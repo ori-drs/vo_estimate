@@ -137,7 +137,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfi
   left_buf_ref_ = (uint8_t*) malloc(3*image_size_); // used of feature output 
   rgb_buf_ = (uint8_t*) malloc(10*image_size_ * sizeof(uint8_t)); 
   decompress_disparity_buf_ = (uint8_t*) malloc( 4*image_size_*sizeof(uint8_t));  // arbitary size chosen..
-  imgutils_ = new image_io_utils( lcm_->getUnderlyingLCM(), stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
+  imgutils_ = new image_io_utils( lcm_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
 
   vo_ = new FoVision(lcm_ , stereo_calibration_);
   features_ = new VoFeatures(lcm_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );

@@ -42,7 +42,7 @@ Pass::Pass(boost::shared_ptr<lcm::LCM> &lcm_, bool verbose_,
 
   // left these numbers very large:
   img_buf_= (uint8_t*) malloc(3* 1524  * 1544);
-  imgutils_ = new image_io_utils( lcm_->getUnderlyingLCM(), 
+  imgutils_ = new image_io_utils( lcm_, 
                                   1524, 
                                   3*1544 );  
 
@@ -74,7 +74,7 @@ void Pass::imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& chan
   msgout_small.height = h;
   msgout_small.row_stride = n_colors*w;
   msgout_small.size = compressed_size;
-  msgout_small.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+  msgout_small.pixelformat = bot_core::image_t::PIXEL_FORMAT_MJPEG;
   msgout_small.data.resize(compressed_size);
   memcpy(msgout_small.data.data(), rgb_compress_buffer_, compressed_size);
   msgout_small.nmetadata =0;
