@@ -43,6 +43,7 @@ struct CommandLineConfig
   bool feature_analysis;
   std::string output_extension;
   bool output_signal;
+  std::string body_channel;
   bool vicon_init; // initializae off of vicon
   std::string input_channel;
   bool verbose;
@@ -148,16 +149,30 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   pose_initialized_ = false;
   if (!cl_cfg_.vicon_init){
     std::cout << "Init internal est using default\n";
-    // Initialise the nominal camera frame with the head pointing horizontally
+
+    // Useful for Atlas logs: initialise with nominal camera frame with the head pointing horizontally
+    /*
     Eigen::Matrix3d M;
     M <<  0,  0, 1,
         -1,  0, 0,
           0, -1, 0;
-
     world_to_camera_ = M * Eigen::Isometry3d::Identity();
     world_to_camera_.translation().x() = 0;
     world_to_camera_.translation().y() = 0;
     world_to_camera_.translation().z() = 1.65; // nominal head height
+    */
+
+    // Useful for Atlas logs: initialise with camera frame upside down but horizontal
+    Eigen::Matrix3d M;
+    M <<  0,  0, 1,
+        1,  0, 0,
+          0, 1, 0;
+    world_to_camera_ = M * Eigen::Isometry3d::Identity();
+    world_to_camera_.translation().x() = 0;
+    world_to_camera_.translation().y() = 0;
+    world_to_camera_.translation().z() = 1.65; // nominal head height
+
+
     pose_initialized_ = true;
   }else{
     lcm_recv_->subscribe("VICON_BODY|VICON_FRONTPLATE",&StereoOdom::viconHandler,this);
@@ -234,7 +249,7 @@ void StereoOdom::updateMotion(int64_t utime){
 
   if (cl_cfg_.output_signal ){
     estimator_->publishPose(utime, "POSE_CAMERA_LEFT_ALT", world_to_camera_, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
-    estimator_->publishPose(utime, "POSE_BODY", new_world_to_body, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
+    estimator_->publishPose(utime, cl_cfg_.body_channel, new_world_to_body, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
   }
   
   // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
@@ -418,11 +433,10 @@ void StereoOdom::viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string&
 
     Eigen::Isometry3d worldvicon_to_camera = worldvicon_to_frontplate_vicon* frontplate_vicon_to_body_vicon * body_to_camera;
     
-    bot_core::pose_t pose_msg = getPoseAsBotPose(worldvicon_to_camera, msg->utime);
-    lcm_pub_->publish("POSE_BODY_ALT", &pose_msg );
+    //bot_core::pose_t pose_msg = getPoseAsBotPose(worldvicon_to_camera, msg->utime);
+    //lcm_pub_->publish("POSE_BODY_ALT", &pose_msg );
     
     world_to_camera_ =  worldvicon_to_camera;
-    // prev_vicon_utime_ = msg->utime;
     
     pose_initialized_ = TRUE;
   }
@@ -438,6 +452,7 @@ int main(int argc, char **argv){
   cl_cfg.camera_config = "CAMERA";
   cl_cfg.input_channel = "CAMERA";
   cl_cfg.output_signal = FALSE;
+  cl_cfg.body_channel = "POSE_BODY_USING_CAMERA";
   cl_cfg.feature_analysis = FALSE; 
   cl_cfg.vicon_init = FALSE;
   cl_cfg.fusion_mode = 0;
@@ -448,7 +463,8 @@ int main(int argc, char **argv){
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
-  parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_BODY and POSE_BODY_ALT signals");
+  parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_CAMERA_LEFT_ALT and body estimates");
+  parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.vicon_init, "g", "vicon_init", "Bootstrap internal estimate using VICON_FRONTPLATE");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
