@@ -41,6 +41,7 @@ struct CommandLineConfig
   std::string camera_config; // which block from the cfg to read
   int fusion_mode;
   bool feature_analysis;
+  int feature_analysis_publish_period; // number of frames between publishing the point features 
   std::string output_extension;
   bool output_signal;
   std::string body_channel;
@@ -188,7 +189,7 @@ int counter =0;
 void StereoOdom::featureAnalysis(){
 
   /// Incremental Feature Output:
-  if (counter%5 == 0 ){
+  if (counter% cl_cfg_.feature_analysis_publish_period  == 0 ){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
     //features_->setCurrentImages(left_buf_, right_buf_);
@@ -460,12 +461,14 @@ int main(int argc, char **argv){
   cl_cfg.in_log_fname = "";
   std::string param_file = ""; // actual file
   cl_cfg.param_file = ""; // full path to file
+  cl_cfg.feature_analysis_publish_period = 1; // 5
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
   parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_CAMERA_LEFT_ALT and body estimates");
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
+  parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");    
   parser.add(cl_cfg.vicon_init, "g", "vicon_init", "Bootstrap internal estimate using VICON_FRONTPLATE");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");

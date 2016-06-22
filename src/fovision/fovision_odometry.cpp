@@ -39,6 +39,7 @@ struct CommandLineConfig
   // 0 none, 1 at init, 2 rpy, 2 rp only
   int fusion_mode;
   bool feature_analysis;
+  int feature_analysis_publish_period; // number of frames between publishing the point features 
   std::string output_extension;
   std::string output_signal;
   std::string input_channel;
@@ -162,7 +163,7 @@ int counter =0;
 void StereoOdom::featureAnalysis(){
 
   /// Incremental Feature Output:
-  if (counter%5 == 0 ){
+  if (counter% cl_cfg_.feature_analysis_publish_period == 0 ){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
     //features_->setCurrentImages(left_buf_, right_buf_);
@@ -598,11 +599,13 @@ int main(int argc, char **argv){
   cl_cfg.output_extension = "";
   cl_cfg.correction_frequency = 1;//; was typicall unused at 100;
   cl_cfg.atlas_version = 5;
+  cl_cfg.feature_analysis_publish_period = 1; // 5
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
   parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_BODY and POSE_BODY_ALT signals");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
+  parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");  
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 rpy, 3 rp only, (both continuous)");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
