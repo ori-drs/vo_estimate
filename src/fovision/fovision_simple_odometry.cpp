@@ -163,7 +163,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     world_to_camera_.translation().z() = 1.65; // nominal head height
     */
 
-    // Useful for Atlas logs: initialise with camera frame upside down but horizontal
+    // Useful for Valkyrie logs: initialise with camera frame upside down but horizontal
     Eigen::Matrix3d M;
     M <<  0,  0, 1,
         1,  0, 0,

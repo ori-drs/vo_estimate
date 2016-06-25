@@ -37,6 +37,7 @@ pods_use_pkg_config_packages(se-simple-fusion eigen3
   voconfig   vofeatures   voestimator   fovision
   pronto_vis  
   opencv image_io_utils
+  path-util
   ${FK_PACKAGES})
 pods_install_executables(se-simple-fusion)
 

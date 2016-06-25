@@ -9,8 +9,6 @@
 
 #include <lcmtypes/bot_core.hpp>
 #include <lcmtypes/multisense.hpp>
-#include <lcmtypes/microstrain.hpp>
-//#include "lcmtypes/drc/atlas_state_t.hpp"
 
 #include "drcvision/voconfig.hpp"
 #include "drcvision/vofeatures.hpp"
@@ -27,6 +25,7 @@
 #include "kdl_parser/kdl_parser.hpp"
 #include "forward_kinematics/treefksolverposfull_recursive.hpp"
 #include <model-client/model-client.hpp>
+#include <path_util/path_util.h>
 
 #include <opencv/cv.h> // for disparity 
 
@@ -46,11 +45,14 @@ struct CommandLineConfig
   bool verbose;
   int correction_frequency;
   int atlas_version;
+  std::string imu_channel;
+  std::string in_log_fname;
+  std::string param_file;
 };
 
 class StereoOdom{
   public:
-    StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_);
+    StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_);
     
     ~StereoOdom(){
       free (left_buf_);
@@ -70,7 +72,8 @@ class StereoOdom{
     
     int64_t utime_cur_, utime_prev_;
 
-    boost::shared_ptr<lcm::LCM> lcm_;
+    boost::shared_ptr<lcm::LCM> lcm_recv_;
+    boost::shared_ptr<lcm::LCM> lcm_pub_;
     BotParam* botparam_;
     BotFrames* botframes_;
     bot::frames* botframes_cpp_;
@@ -98,8 +101,10 @@ class StereoOdom{
     // IMU
     bool pose_initialized_; // initalized from VO
     int imu_counter_;
-    void microstrainHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  microstrain::ins_t* msg);
+    void microstrainHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg);
+    Eigen::Quaterniond imuOrientationToRobotOrientation(const bot_core::ins_t *msg);
     void fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t utime);
+    Eigen::Isometry3d imu_to_body_;
     
     // previous successful vo estimates as rates:
     Eigen::Vector3d vo_velocity_linear_;
@@ -109,16 +114,26 @@ class StereoOdom{
     Eigen::Vector3d imu_velocity_angular_alpha_; // in head frame
 };    
 
-StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfig& cl_cfg_) : 
-       lcm_(lcm_), cl_cfg_(cl_cfg_), utime_cur_(0), utime_prev_(0), 
-       ref_utime_(0), changed_ref_frames_(false){
-
+StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
+       lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), utime_cur_(0), utime_prev_(0), 
+       ref_utime_(0), changed_ref_frames_(false)
+{
   // Set up frames and config:
-  botparam_ = bot_param_new_from_server(lcm_->getUnderlyingLCM(), 0);
-  botframes_= bot_frames_get_global(lcm_->getUnderlyingLCM(), botparam_);
+  if (cl_cfg_.param_file.empty()) {
+    std::cout << "Get param from LCM\n";
+    botparam_ = bot_param_get_global(lcm_recv_->getUnderlyingLCM(), 0);
+  } else {
+    std::cout << "Get param from file\n";
+    botparam_ = bot_param_new_from_file(cl_cfg_.param_file.c_str());
+  }
+  if (botparam_ == NULL) {
+    exit(1);
+  }
+  botframes_= bot_frames_get_global(lcm_recv_->getUnderlyingLCM(), botparam_);
   botframes_cpp_ = new bot::frames(botframes_);
 
-  model_ = boost::shared_ptr<ModelClient>(new ModelClient(lcm_->getUnderlyingLCM(), 0));
+  /*
+  model_ = boost::shared_ptr<ModelClient>(new ModelClient(lcm_recv_->getUnderlyingLCM(), 0));
   KDL::Tree tree;
   if (!kdl_parser::treeFromString( model_->getURDFString() ,tree)){
     cerr << "ERROR: Failed to extract kdl tree from xml robot description" << endl;
@@ -126,6 +141,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfi
   }
   fksolver_ = boost::shared_ptr<KDL::TreeFkSolverPosFull_recursive>(new KDL::TreeFkSolverPosFull_recursive(tree));
   //last_atlas_state_msg_.utime = 0;
+  */
 
   config_ = new voconfig::KmclConfiguration(botparam_, cl_cfg_.camera_config);
   boost::shared_ptr<fovis::StereoCalibration> stereo_calibration_;
@@ -138,11 +154,11 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfi
   left_buf_ref_ = (uint8_t*) malloc(3*image_size_); // used of feature output 
   rgb_buf_ = (uint8_t*) malloc(10*image_size_ * sizeof(uint8_t)); 
   decompress_disparity_buf_ = (uint8_t*) malloc( 4*image_size_*sizeof(uint8_t));  // arbitary size chosen..
-  imgutils_ = new image_io_utils( lcm_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
+  imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
 
-  vo_ = new FoVision(lcm_ , stereo_calibration_);
-  features_ = new VoFeatures(lcm_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
-  estimator_ = new VoEstimator(lcm_ , botframes_, cl_cfg_.output_extension );
+  vo_ = new FoVision(lcm_pub_ , stereo_calibration_);
+  features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
+  estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension );
 
   Eigen::Isometry3d init_pose;
   init_pose = Eigen::Isometry3d::Identity();
@@ -152,9 +168,12 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_, const CommandLineConfi
   // IMU:
   pose_initialized_=false;
   imu_counter_=0;
+  lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::multisenseHandler,this);
+  lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
+  // This assumes the imu to body frame is fixed, need to update if the neck is actuated
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, imu_to_body_);
 
-  lcm_->subscribe( cl_cfg_.input_channel,&StereoOdom::multisenseHandler,this);
-  lcm_->subscribe("MICROSTRAIN_INS",&StereoOdom::microstrainHandler,this);
+
   cout <<"StereoOdom Constructed\n";
 }
 
@@ -395,41 +414,23 @@ void StereoOdom::multisenseLRHandler(const lcm::ReceiveBuffer* rbuf,
 }
 
 
-
-
-
-// Transform the Microstrain IMU orientation into the head frame:
-// TODO: add an imu frame into the config
-Eigen::Quaterniond microstrainIMUToRobotOrientation(const microstrain::ins_t *msg){
+// Transform the Microstrain IMU orientation into the body frame:
+Eigen::Quaterniond StereoOdom::imuOrientationToRobotOrientation(const bot_core::ins_t *msg){
   Eigen::Quaterniond m(msg->quat[0],msg->quat[1],msg->quat[2],msg->quat[3]);
   Eigen::Isometry3d motion_estimate;
   motion_estimate.setIdentity();
   motion_estimate.translation() << 0,0,0;
   motion_estimate.rotate(m);
 
-  // rotate coordinate frame so that look vector is +X, and up is +Z
-  Eigen::Matrix3d M;
+  // rotate IMU orientation so that look vector is +X, and up is +Z
+  // TODO: do this with rotation matrices for efficiency:
+  Eigen::Isometry3d body_pose_from_imu = motion_estimate * imu_to_body_;
+  Eigen::Quaterniond body_orientation_from_imu(body_pose_from_imu.rotation());
+  // For debug:
+  //estimator_->publishPose(msg->utime, "POSE_BODY" , motion_estimate_out, Eigen::Vector3d::Identity() , Eigen::Vector3d::Identity());
+  //estimator_->publishPose(msg->utime, "POSE_BODY_ALT" , motion_estimate, Eigen::Vector3d::Identity() , Eigen::Vector3d::Identity());
 
-  // TODO: use bot frames to do this automatically
-  //convert imu  on drc rig from:
-  //x+ back, z+ down, y+ left
-  //to x+ forward, y+ left, z+ up (robotics)
-  M <<  -1, 0, 0,
-         0, 1, 0,
-         0, 0, -1;
-
-  motion_estimate= M * motion_estimate;
-  Eigen::Vector3d translation(motion_estimate.translation());
-  Eigen::Quaterniond rotation(motion_estimate.rotation());
-  rotation = rotation * M.transpose();
-
-  Eigen::Isometry3d motion_estimate_out;
-  motion_estimate_out.setIdentity();
-  motion_estimate_out.translation() << translation[0],translation[1],translation[2];
-  motion_estimate_out.rotate(rotation);
-  Eigen::Quaterniond r_x(motion_estimate_out.rotation());
-
-  return r_x;
+  return body_orientation_from_imu;
 }
 
 void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t utime){
@@ -438,7 +439,9 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
     return;
   
   if (!pose_initialized_){
-    if((cl_cfg_.fusion_mode ==1) ||(cl_cfg_.fusion_mode ==2) ){
+    std::vector<int> init_modes = {1,2,3};
+    if(std::find(init_modes.begin(), init_modes.end(), cl_cfg_.fusion_mode) != init_modes.end()) {
+    //if((cl_cfg_.fusion_mode ==1) ||(cl_cfg_.fusion_mode ==2)  ){
       Eigen::Isometry3d init_pose;
       init_pose.setIdentity();
       init_pose.translation() << 0,0,0;
@@ -546,7 +549,7 @@ Eigen::Isometry3d KDLToEigen(KDL::Frame tf){
 
 int temp_counter = 0;
 void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf, 
-     const std::string& channel, const  microstrain::ins_t* msg){
+     const std::string& channel, const  bot_core::ins_t* msg){
   temp_counter++;
   if (temp_counter > 5){
     //std::cout << msg->gyro[0] << ", " << msg->gyro[1] << ", " << msg->gyro[2] << " rotation rate, gyro frame\n";
@@ -554,7 +557,7 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
   }
 
   Eigen::Quaterniond imu_robotorientation;
-  imu_robotorientation =microstrainIMUToRobotOrientation(msg);
+  imu_robotorientation = imuOrientationToRobotOrientation(msg);
   fuseInterial(imu_robotorientation, msg->utime);
 
   /*
@@ -600,6 +603,9 @@ int main(int argc, char **argv){
   cl_cfg.correction_frequency = 1;//; was typicall unused at 100;
   cl_cfg.atlas_version = 5;
   cl_cfg.feature_analysis_publish_period = 1; // 5
+  cl_cfg.imu_channel = "IMU_MICROSTRAIN";
+  std::string param_file = ""; // actual file
+  cl_cfg.param_file = ""; // full path to file
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -611,15 +617,40 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
   parser.add(cl_cfg.correction_frequency, "y", "correction_frequency", "Correct the R/P every XX IMU measurements");
   parser.add(cl_cfg.verbose, "v", "verbose", "Verbose printf");
+  parser.add(cl_cfg.imu_channel, "imu", "imu_channel", "IMU channel to listen for");
   parser.add(cl_cfg.atlas_version, "a", "atlas_version", "Atlas version to use");
+  parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
+  parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
   
-  boost::shared_ptr<lcm::LCM> lcm(new lcm::LCM);
-  if(!lcm->good()){
-    std::cerr <<"ERROR: lcm is not good()" <<std::endl;
+  cl_cfg.param_file = std::string(getConfigPath()) +'/' + std::string(param_file);
+  if (param_file.empty()) { // get param from lcm
+    cl_cfg.param_file = "";
   }
-  StereoOdom fo= StereoOdom(lcm, cl_cfg);
-  while(0 == lcm->handle());
+
+  //
+  bool running_from_log = !cl_cfg.in_log_fname.empty();
+  boost::shared_ptr<lcm::LCM> lcm_recv;
+  boost::shared_ptr<lcm::LCM> lcm_pub;
+  if (running_from_log) {
+    printf("running from log file: %s\n", cl_cfg.in_log_fname.c_str());
+    //std::string lcmurl = "file://" + in_log_fname + "?speed=0";
+    std::stringstream lcmurl;
+    //lcmurl << "file://" << in_log_fname << "?speed=" << processing_rate << "&start_timestamp=" << begin_timestamp;
+    lcmurl << "file://" << cl_cfg.in_log_fname ;
+    lcm_recv = boost::shared_ptr<lcm::LCM>(new lcm::LCM(lcmurl.str()));
+    if (!lcm_recv->good()) {
+      fprintf(stderr, "Error couldn't load log file %s\n", lcmurl.str().c_str());
+      exit(1);
+    }
+  }
+  else {
+    lcm_recv = boost::shared_ptr<lcm::LCM>(new lcm::LCM);
+  }
+  lcm_pub = boost::shared_ptr<lcm::LCM>(new lcm::LCM);
+
+  StereoOdom fo= StereoOdom(lcm_recv, lcm_pub, cl_cfg);
+  while(0 == lcm_recv->handle());
 }
