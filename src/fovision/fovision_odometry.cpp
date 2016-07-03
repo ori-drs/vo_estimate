@@ -110,14 +110,14 @@ class StereoOdom{
     void microstrainHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg);
     Eigen::Quaterniond imuOrientationToRobotOrientation(const bot_core::ins_t *msg);
     void fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_imu, int64_t utime);
-    Eigen::Isometry3d imu_to_body_;
+    Eigen::Isometry3d body_to_imu_, imu_to_camera_;
     
     // previous successful vo estimates as rates:
     Eigen::Vector3d vo_velocity_linear_;
     Eigen::Vector3d vo_velocity_angular_;
-    Eigen::Vector3d imu_velocity_linear_; // in head frame (0,0,0)
-    Eigen::Vector3d imu_velocity_angular_; // in head frame
-    Eigen::Vector3d imu_velocity_angular_alpha_; // in head frame
+    Eigen::Vector3d camera_linear_velocity_from_imu_; // in camera frame
+    Eigen::Vector3d camera_angular_velocity_from_imu_; // in camera frame
+    Eigen::Vector3d camera_angular_velocity_from_imu_alpha_; // in camera frame
 };    
 
 StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
@@ -177,7 +177,8 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::multisenseHandler,this);
   lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
   // This assumes the imu to body frame is fixed, need to update if the neck is actuated
-  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, imu_to_body_);
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, body_to_imu_);
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "imu", "CAMERA_LEFT", 0, imu_to_camera_);
 
 
   cout <<"StereoOdom Constructed\n";
@@ -261,15 +262,10 @@ void StereoOdom::updateMotion(){
       // This orientation is not mathematically correct:
       std::cout << dt << " sec | "
                 << vo_velocity_linear_.transpose()   << " m/s | "
-                << imu_velocity_angular_.transpose() << " r/s to be extrapolated\n";
+                << camera_angular_velocity_from_imu_.transpose() << " r/s to be extrapolated\n";
 
-      // Original Extrapolation:
-      //Eigen::Quaterniond extrapolated_quat = euler_to_quat( vo_velocity_angular_[0]*dt, vo_velocity_angular_[1]*dt, vo_velocity_angular_[2]*dt);
-
-      // Use IMU rot_rates to extrapolate rotation: This is wrong except for y (yaw)
-      // since imu_velocity_angular_ is in head frame, it needs to be transformed into camera
-      // x becomes z, y becomes -x, z becomes -y
-      Eigen::Quaterniond extrapolated_quat = euler_to_quat( -imu_velocity_angular_[1]*dt, -imu_velocity_angular_[2]*dt, imu_velocity_angular_[0]*dt);
+      // Use IMU rot_rates to extrapolate rotation: This is mathematically incorrect:
+      Eigen::Quaterniond extrapolated_quat = euler_to_quat( camera_angular_velocity_from_imu_[0]*dt, camera_angular_velocity_from_imu_[1]*dt, camera_angular_velocity_from_imu_[2]*dt);
 
       delta_camera.setIdentity();
       delta_camera.translation().x() = vo_velocity_linear_[0] * dt;
@@ -430,7 +426,7 @@ Eigen::Quaterniond StereoOdom::imuOrientationToRobotOrientation(const bot_core::
 
   // rotate IMU orientation so that look vector is +X, and up is +Z
   // TODO: do this with rotation matrices for efficiency:
-  Eigen::Isometry3d body_pose_from_imu = motion_estimate * imu_to_body_;
+  Eigen::Isometry3d body_pose_from_imu = motion_estimate * body_to_imu_;
   Eigen::Quaterniond body_orientation_from_imu(body_pose_from_imu.rotation());
   // For debug:
   //estimator_->publishPose(msg->utime, "POSE_BODY" , motion_estimate_out, Eigen::Vector3d::Identity() , Eigen::Vector3d::Identity());
@@ -549,34 +545,23 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
   local_to_body_orientation_from_imu = imuOrientationToRobotOrientation(msg);
   fuseInterial(local_to_body_orientation_from_imu, msg->utime);
 
-  /*
-  // Alternative Pose for the typical system to see:
-  double rpy[3];
-  quat_to_euler(  local_to_body_orientation_from_imu , rpy[0], rpy[1], rpy[2]);
-  Eigen::Quaterniond imu_robotorientation_less_yaw = euler_to_quat( rpy[0], rpy[1], 0);
-  bot_core_pose_t pose_msg;
-  memset(&pose_msg, 0, sizeof(pose_msg));
-  pose_msg.utime =   msg->utime;
-  pose_msg.pos[0] = 0;
-  pose_msg.pos[1] = 0;
-  pose_msg.pos[2] = 1.65; // nominal head height
-  pose_msg.orientation[0] = local_to_body_orientation_from_imu_less_yaw.w();
-  pose_msg.orientation[1] = local_to_body_orientation_from_imu_less_yaw.x();
-  pose_msg.orientation[2] = local_to_body_orientation_from_imu_less_yaw.y();
-  pose_msg.orientation[3] = local_to_body_orientation_from_imu_less_yaw.z();
-  bot_core_pose_t_publish(lcm_->getUnderlyingLCM(), "POSE_BODY", &pose_msg);
-  */
+  // Transform rotation Rates into body frame:
+  double camera_ang_vel_from_imu_[3];
+  Eigen::Quaterniond imu_to_camera_quat = Eigen::Quaterniond( imu_to_camera_.rotation() );
+  double imu_to_camera_quat_array[4];
+  imu_to_camera_quat_array[0] =imu_to_camera_quat.w(); imu_to_camera_quat_array[1] =imu_to_camera_quat.x();
+  imu_to_camera_quat_array[2] =imu_to_camera_quat.y(); imu_to_camera_quat_array[3] =imu_to_camera_quat.z();
+  bot_quat_rotate_to( imu_to_camera_quat_array, msg->gyro, camera_ang_vel_from_imu_);
+  camera_angular_velocity_from_imu_ = Eigen::Vector3d(camera_ang_vel_from_imu_[0], camera_ang_vel_from_imu_[1], camera_ang_vel_from_imu_[2]);
+  // Didn't find this necessary - for smooth motion
+  //camera_angular_velocity_from_imu_alpha_ = 0.8*camera_angular_velocity_from_imu_alpha_ + 0.2*camera_angular_velocity_from_imu_;
 
-  // TODO: use bot frames to transform this properly
-  imu_velocity_linear_  = Eigen::Vector3d(0,0,0);
-  imu_velocity_angular_ = Eigen::Vector3d(-msg->gyro[0], msg->gyro[1], -msg->gyro[2]);
-  // Didn't find this necessary:
-  //imu_velocity_angular_alpha_ = 0.8*imu_velocity_angular_alpha_ + 0.2*imu_velocity_angular_;
+  camera_linear_velocity_from_imu_  = Eigen::Vector3d(0,0,0);
 
   // experimentally correct for sensor timing offset:
   int64_t temp_utime = msg->utime;// + 120000;
-  estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), imu_velocity_linear_, imu_velocity_angular_);
-  // estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), imu_velocity_linear_, imu_velocity_angular_alpha_);
+  estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), camera_linear_velocity_from_imu_, camera_angular_velocity_from_imu_);
+  // estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), camera_linear_velocity_from_imu_, camera_angular_velocity_from_imu_alpha_);
 }
 
 
