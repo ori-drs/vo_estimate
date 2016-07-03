@@ -1,6 +1,12 @@
 // A VO-based non-probablistic state estimator for the multisense
 // - occasionally uses IMU to avoid orientation drift
 // - when VO fails extrapolate using previous vision lin rate and imu rot rates
+
+// For IMU orientation integration:
+// Estimate is maintained in the body frame which is assumed to be
+// Forward-Left-Up such at roll and pitch can be isolated from yaw.
+
+
 #include <zlib.h>
 #include <lcm/lcm-cpp.hpp>
 #include <bot_param/param_client.h>
@@ -103,7 +109,7 @@ class StereoOdom{
     int imu_counter_;
     void microstrainHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg);
     Eigen::Quaterniond imuOrientationToRobotOrientation(const bot_core::ins_t *msg);
-    void fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t utime);
+    void fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_imu, int64_t utime);
     Eigen::Isometry3d imu_to_body_;
     
     // previous successful vo estimates as rates:
@@ -163,7 +169,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   Eigen::Isometry3d init_pose;
   init_pose = Eigen::Isometry3d::Identity();
   init_pose.translation() = Eigen::Vector3d(0,0,1.65); // nominal head height
-  estimator_->setHeadPose(init_pose);
+  estimator_->setBodyPose(init_pose);
 
   // IMU:
   pose_initialized_=false;
@@ -433,7 +439,7 @@ Eigen::Quaterniond StereoOdom::imuOrientationToRobotOrientation(const bot_core::
   return body_orientation_from_imu;
 }
 
-void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t utime){
+void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_imu, int64_t utime){
 
   if (cl_cfg_.fusion_mode==0) // Got IMU measurement - not incorporating them.
     return;
@@ -445,8 +451,8 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
       Eigen::Isometry3d init_pose;
       init_pose.setIdentity();
       init_pose.translation() << 0,0,0;
-      init_pose.rotate( imu_robotorientation );
-      estimator_->setHeadPose(init_pose);
+      init_pose.rotate( local_to_body_orientation_from_imu );
+      estimator_->setBodyPose(init_pose);
       pose_initialized_ = true;
       cout << "got first IMU measurement\n";
       return;
@@ -462,7 +468,7 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
       // combine, convert to camera frame... set as pose
 
       // 1. Get the currently estimated head pose and its rpy
-      Eigen::Isometry3d local_to_head = estimator_->getHeadPose();// _local_to_camera *cam2head;
+      Eigen::Isometry3d local_to_head = estimator_->getBodyPose();// _local_to_camera *cam2head;
       std::stringstream ss2;
       print_Isometry3d(local_to_head, ss2);
       double rpy[3];
@@ -474,7 +480,7 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
         
       // 2. Get the IMU orientated RPY:
       double rpy_imu[3];
-      quat_to_euler( imu_robotorientation , 
+      quat_to_euler( local_to_body_orientation_from_imu , 
                       rpy_imu[0], rpy_imu[1], rpy_imu[2]);
       if (cl_cfg_.verbose){
         std::cout <<  rpy_imu[0]*180/M_PI << " " << rpy_imu[1]*180/M_PI << " " << rpy_imu[2]*180/M_PI << " rpy_imu\n";        
@@ -484,17 +490,17 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
       }
       
       // 3. Merge the two orientation estimates:
-      Eigen::Quaterniond revised_local_to_head_quat;
+      Eigen::Quaterniond revised_local_to_body_quat;
       if (cl_cfg_.fusion_mode==2){ // rpy:
-        revised_local_to_head_quat = imu_robotorientation;
+        revised_local_to_body_quat = local_to_body_orientation_from_imu;
       }else{  // pitch and roll from IMU, yaw from VO:
-        revised_local_to_head_quat = euler_to_quat( rpy_imu[0], rpy_imu[1], rpy[2]);
+        revised_local_to_body_quat = euler_to_quat( rpy_imu[0], rpy_imu[1], rpy[2]);
       }
       ///////////////////////////////////////
       Eigen::Isometry3d revised_local_to_head;
       revised_local_to_head.setIdentity();
       revised_local_to_head.translation() = local_to_head.translation();
-      revised_local_to_head.rotate(revised_local_to_head_quat);
+      revised_local_to_head.rotate(revised_local_to_body_quat);
       
       // 4. Set the Head pose using the merged orientation:
       if (cl_cfg_.verbose){
@@ -504,29 +510,12 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond imu_robotorientation, int64_t u
         std::cout << "local_revhead: " << ss4.str() << " | "<< 
           rpy[0]*180/M_PI << " " << rpy[1]*180/M_PI << " " << rpy[2]*180/M_PI << "\n";        
       }
-      estimator_->setHeadPose(revised_local_to_head);
+      estimator_->setBodyPose(revised_local_to_head);
 
       // Publish the Position of the floating head:
       estimator_->publishUpdate(utime, revised_local_to_head, cl_cfg_.output_signal, false);
 
-      // determine the position of the robot given the head, through kinematics:
-      /*
-      if (last_atlas_state_msg_.utime > 0){
-        Eigen::Isometry3d body_to_head;
-        bool status = getBodyToHead(&last_atlas_state_msg_, body_to_head);
 
-        std::stringstream ss2;
-        print_Isometry3d(body_to_head, ss2);
-        std::cout << "b2h: " << ss2.str() << " and "<< (int) status <<"\n";
-
-        Eigen::Isometry3d revised_local_to_body = revised_local_to_head * body_to_head.inverse();
-
-        estimator_->publishPose(utime, "POSE_BODY" , revised_local_to_body, Eigen::Vector3d::Identity() , Eigen::Vector3d::Identity());
-
-
-      }else{
-        std::cout << "no atlas state provided - refusing to publish\n";
-      }*/
 
     }
     if (imu_counter_ > cl_cfg_.correction_frequency) { imu_counter_ =0; }
@@ -556,14 +545,14 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
     temp_counter=0;
   }
 
-  Eigen::Quaterniond imu_robotorientation;
-  imu_robotorientation = imuOrientationToRobotOrientation(msg);
-  fuseInterial(imu_robotorientation, msg->utime);
+  Eigen::Quaterniond local_to_body_orientation_from_imu;
+  local_to_body_orientation_from_imu = imuOrientationToRobotOrientation(msg);
+  fuseInterial(local_to_body_orientation_from_imu, msg->utime);
 
   /*
   // Alternative Pose for the typical system to see:
   double rpy[3];
-  quat_to_euler(  imu_robotorientation , rpy[0], rpy[1], rpy[2]);
+  quat_to_euler(  local_to_body_orientation_from_imu , rpy[0], rpy[1], rpy[2]);
   Eigen::Quaterniond imu_robotorientation_less_yaw = euler_to_quat( rpy[0], rpy[1], 0);
   bot_core_pose_t pose_msg;
   memset(&pose_msg, 0, sizeof(pose_msg));
@@ -571,10 +560,10 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
   pose_msg.pos[0] = 0;
   pose_msg.pos[1] = 0;
   pose_msg.pos[2] = 1.65; // nominal head height
-  pose_msg.orientation[0] = imu_robotorientation_less_yaw.w();
-  pose_msg.orientation[1] = imu_robotorientation_less_yaw.x();
-  pose_msg.orientation[2] = imu_robotorientation_less_yaw.y();
-  pose_msg.orientation[3] = imu_robotorientation_less_yaw.z();
+  pose_msg.orientation[0] = local_to_body_orientation_from_imu_less_yaw.w();
+  pose_msg.orientation[1] = local_to_body_orientation_from_imu_less_yaw.x();
+  pose_msg.orientation[2] = local_to_body_orientation_from_imu_less_yaw.y();
+  pose_msg.orientation[3] = local_to_body_orientation_from_imu_less_yaw.z();
   bot_core_pose_t_publish(lcm_->getUnderlyingLCM(), "POSE_BODY", &pose_msg);
   */
 

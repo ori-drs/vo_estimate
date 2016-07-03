@@ -4,11 +4,11 @@ VoEstimator::VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes
   std::string channel_extension_):
   lcm_(lcm_), botframes_(botframes_), channel_extension_(channel_extension_),
   pose_initialized_(false), vo_initialized_(false){
-  local_to_head_.setIdentity();
+  local_to_body_.setIdentity();
 
   // Assume head to camera is rigid:
   // TODO: remove bot frames dependency by providing this transform in constructor:
-  botframes_cpp_->get_trans_with_utime( botframes_ ,  "head", "CAMERA_LEFT", 0, camera_to_head_);
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "CAMERA_LEFT", 0, camera_to_body_);
   
   // Vis Config:
   pc_vis_ = new pronto_vis( lcm_->getUnderlyingLCM() );
@@ -19,8 +19,8 @@ VoEstimator::VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes
 void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isometry3d delta_camera){
 
   // 1. Update the Position of the head frame:
-  Eigen::Isometry3d delta_head = camera_to_head_.inverse()*delta_camera*camera_to_head_;
-  local_to_head_ = local_to_head_*delta_head;
+  Eigen::Isometry3d delta_head = camera_to_body_.inverse()*delta_camera*camera_to_body_;
+  local_to_body_ = local_to_body_*delta_head;
 
   // 2. Evaluate Rates:
   double delta_time =  ( (double) utime - utime_prev)/1E6;
@@ -30,7 +30,7 @@ void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isome
   }else{
     vo_initialized_ = true;
     
-    //Eigen::Isometry3d delta_head =  local_to_head_prev_.inverse() * local_to_head_;
+    //Eigen::Isometry3d delta_head =  local_to_body_prev_.inverse() * local_to_body_;
     head_lin_rate_ = delta_head.translation()/delta_time;
     Eigen::Vector3d delta_head_rpy;
     quat_to_euler(  Eigen::Quaterniond(delta_head.rotation()) , delta_head_rpy(0), delta_head_rpy(1), delta_head_rpy(2));
@@ -43,8 +43,8 @@ void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isome
   head_rot_rate_alpha_ =  alpha*head_rot_rate_alpha_ + (1-alpha)*head_rot_rate_;
 
   // 4. Output the head position update, at the rates provided by VO
-  publishUpdate(utime_prev, local_to_head_, "POSE_HEAD_ALT_FOVIS", true);
-  local_to_head_prev_ = local_to_head_;
+  publishUpdate(utime_prev, local_to_body_, "POSE_HEAD_ALT_FOVIS", true);
+  local_to_body_prev_ = local_to_body_;
   delta_head_prev_ = delta_head;
 }
   

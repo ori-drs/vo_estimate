@@ -30,10 +30,10 @@ public:
 
   void updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isometry3d delta_camera);
 
-  Eigen::Isometry3d getCameraPose(){ return local_to_head_*camera_to_head_.inverse(); }
-  Eigen::Isometry3d getHeadPose(){ return local_to_head_; }
-  void setHeadPose(Eigen::Isometry3d local_to_head_in){
-    local_to_head_ = local_to_head_in;
+  Eigen::Isometry3d getCameraPose(){ return local_to_body_*camera_to_body_.inverse(); }
+  Eigen::Isometry3d getBodyPose(){ return local_to_body_; }
+  void setBodyPose(Eigen::Isometry3d local_to_body_in){
+    local_to_body_ = local_to_body_in;
     pose_initialized_ = true;
   }
 
@@ -56,10 +56,10 @@ private:
   bot::frames* botframes_cpp_;
 
   std::string channel_extension_;
-  Eigen::Isometry3d camera_to_head_;
-  Eigen::Isometry3d local_to_head_;
+  Eigen::Isometry3d camera_to_body_;
+  Eigen::Isometry3d local_to_body_;
   
-  Eigen::Isometry3d local_to_head_prev_;
+  Eigen::Isometry3d local_to_body_prev_;
   Eigen::Isometry3d delta_head_prev_;
   
   // Cache of rates: All are stored as RPY
