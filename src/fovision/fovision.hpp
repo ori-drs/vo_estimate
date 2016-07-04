@@ -19,15 +19,22 @@
 #include <lcmtypes/fovis_stats_t.h>
 #include <lcmtypes/fovis_update_t.h>
 
+#include <bot_lcmgl_client/lcmgl.h>
+#include "visualization.hpp"
+
+
 class FoVision
 {
 public:
     FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
-             boost::shared_ptr<fovis::StereoCalibration> kcal);
-    //FoVision(boost::shared_ptr<lcm::LCM> &lcm_);
+             boost::shared_ptr<fovis::StereoCalibration> kcal,
+             bool draw_lcmgl_);
     
     
     ~FoVision();
+
+    bool draw_lcmgl_;
+    
     
     void doOdometry(uint8_t *left_buf,uint8_t *right_buf, int64_t utime);
     void doOdometry(uint8_t *left_buf,float *disparity_buf, int64_t utime);
@@ -107,6 +114,8 @@ private:
     fovis::StereoCalibration* default_config();
     static fovis::VisualOdometryOptions getDefaultOptions();
     int64_t current_timestamp_,prev_timestamp_;
+
+    Visualization* visualization_;    
 };
 
 #endif

@@ -4,9 +4,10 @@
 using namespace std;
 
 FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
-  boost::shared_ptr<fovis::StereoCalibration> kcal):
-  lcm_(lcm_), kcal_(kcal), odom_(kcal_->getLeftRectification(),  
-  FoVision::getDefaultOptions()), //stereo_depth_(kcal_.get()),
+  boost::shared_ptr<fovis::StereoCalibration> kcal, bool draw_lcmgl_):
+  lcm_(lcm_), kcal_(kcal), draw_lcmgl_(draw_lcmgl_),
+  odom_(kcal_->getLeftRectification(),  
+  FoVision::getDefaultOptions()),
   pose_(Eigen::Isometry3d::Identity())
 {
 //  fovis::CameraIntrinsicsParameters rgb_params = kcal_->getParameters().rgb_params;
@@ -20,20 +21,18 @@ FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
   stereo_disparity_= new fovis::StereoDisparity( kcal_.get()) ;// vo_opts); vo_opts no longer required
   
  // converted_depth_data_= new float[rgb_params.width * rgb_params.height];  
+
+
+  //#ifdef USE_LCMGL
+    // use bot_param_lcm because it doesn't come from logfile
+  if (draw_lcmgl_){
+    bot_lcmgl_t* lcmgl = bot_lcmgl_init(lcm_->getUnderlyingLCM(), "stereo-odometry");
+    visualization_ = new Visualization(lcmgl, kcal.get());
+  }
+  //#endif
+
 }
 
-
-/*
-FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_):
-  lcm_(lcm_), kcal_(default_config()), odom_(kcal_->getLeftRectification(), 
-  fovis::VisualOdometry::getDefaultOptions()), //depth_producer_(kcal_.get()), 
-  pose_(Eigen::Isometry3d::Identity())
-{
-  fovis::CameraIntrinsicsParameters rgb_params = kcal_->getParameters().rgb_params;
-  depth_image_ = new fovis::DepthImage(rgb_params, rgb_params.width, rgb_params.height);
-  depth_data_ = new float[rgb_params.width * rgb_params.height];
-} 
-*/
 
 FoVision::~FoVision()
 {
@@ -50,6 +49,11 @@ void FoVision::doOdometry(uint8_t *left_buf,uint8_t *right_buf, int64_t utime){
   stereo_depth_->setRightImage(right_buf);
   odom_.processFrame(left_buf, stereo_depth_);
   const fovis::MotionEstimator * me = odom_.getMotionEstimator();
+
+  //#ifdef USE_LCMGL
+  if(draw_lcmgl_) { visualization_->draw(&odom_); }
+  //#endif  
+
 }
 
 // Left and Disparity:
@@ -60,6 +64,11 @@ void FoVision::doOdometry(uint8_t *left_buf,float *disparity_buf, int64_t utime)
   stereo_disparity_->setDisparityData(disparity_buf);
   odom_.processFrame(left_buf, stereo_disparity_);
   const fovis::MotionEstimator * me = odom_.getMotionEstimator();
+
+
+  //#ifdef USE_LCMGL
+  if(draw_lcmgl_) { visualization_->draw(&odom_); }
+  //#endif  
 }
 
 void FoVision::send_status_msg(std::string text){

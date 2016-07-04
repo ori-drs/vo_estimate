@@ -54,6 +54,7 @@ struct CommandLineConfig
   std::string imu_channel;
   std::string in_log_fname;
   std::string param_file;
+  bool draw_lcmgl;
 };
 
 class StereoOdom{
@@ -162,7 +163,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   decompress_disparity_buf_ = (uint8_t*) malloc( 4*image_size_*sizeof(uint8_t));  // arbitary size chosen..
   imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
 
-  vo_ = new FoVision(lcm_pub_ , stereo_calibration_);
+  vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl);
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
   estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension );
 
@@ -580,6 +581,7 @@ int main(int argc, char **argv){
   cl_cfg.imu_channel = "IMU_MICROSTRAIN";
   std::string param_file = ""; // actual file
   cl_cfg.param_file = ""; // full path to file
+  cl_cfg.draw_lcmgl = FALSE;  
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -595,6 +597,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.atlas_version, "a", "atlas_version", "Atlas version to use");
   parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
+  parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
