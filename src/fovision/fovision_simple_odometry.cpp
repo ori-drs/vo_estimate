@@ -471,7 +471,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");    
-  parser.add(cl_cfg.vicon_init, "g", "vicon_init", "Bootstrap internal estimate using VICON_FRONTPLATE");
+  parser.add(cl_cfg.vicon_init, "v", "vicon_init", "Bootstrap internal estimate using VICON_FRONTPLATE");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
