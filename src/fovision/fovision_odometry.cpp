@@ -47,6 +47,7 @@ struct CommandLineConfig
   int feature_analysis_publish_period; // number of frames between publishing the point features 
   std::string output_extension;
   std::string output_signal;
+  bool output_signal_at_10Hz;
   std::string input_channel;
   bool verbose;
   int correction_frequency;
@@ -316,6 +317,15 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
   utime_prev_ = utime_cur_;
   utime_cur_ = msg->utime;
 
+  if (cl_cfg_.output_signal_at_10Hz){
+    // Publish the current estimate - using the previous image timestamp
+    // this pose is the latest timestamp 
+    // TODO: decide when and at what stage we want to change the 
+    Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
+    estimator_->publishUpdate(utime_prev_, local_to_body, "POSE_BODY_10HZ", false);
+    //lcm_pub_->publish("CAMERA_REPUBLISH", msg);
+  }
+
   // Detect the image stream and process accordingly
   if ( (msg->image_types[0] ==  bot_core::images_t::LEFT) &&
        (msg->image_types[1] ==  bot_core::images_t::RIGHT) ) {
@@ -455,7 +465,7 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
       return;
     }
   }
-  
+
   if((cl_cfg_.fusion_mode ==2) ||(cl_cfg_.fusion_mode ==3) ){
     if (imu_counter_== cl_cfg_.correction_frequency){
       // Every X frames: replace the pitch and roll with that from the IMU
@@ -465,13 +475,13 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
       // combine, convert to camera frame... set as pose
 
       // 1. Get the currently estimated head pose and its rpy
-      Eigen::Isometry3d local_to_head = estimator_->getBodyPose();// _local_to_camera *cam2head;
+      Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
       std::stringstream ss2;
-      print_Isometry3d(local_to_head, ss2);
+      print_Isometry3d(local_to_body, ss2);
       double rpy[3];
-      quat_to_euler(  Eigen::Quaterniond(local_to_head.rotation()) , rpy[0], rpy[1], rpy[2]);
+      quat_to_euler(  Eigen::Quaterniond(local_to_body.rotation()) , rpy[0], rpy[1], rpy[2]);
       if (cl_cfg_.verbose){
-        std::cout << "local_to_head: " << ss2.str() << " | "<< 
+        std::cout << "local_to_body: " << ss2.str() << " | "<< 
           rpy[0]*180/M_PI << " " << rpy[1]*180/M_PI << " " << rpy[2]*180/M_PI << "\n";        
       }
         
@@ -494,23 +504,23 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
         revised_local_to_body_quat = euler_to_quat( rpy_imu[0], rpy_imu[1], rpy[2]);
       }
       ///////////////////////////////////////
-      Eigen::Isometry3d revised_local_to_head;
-      revised_local_to_head.setIdentity();
-      revised_local_to_head.translation() = local_to_head.translation();
-      revised_local_to_head.rotate(revised_local_to_body_quat);
+      Eigen::Isometry3d revised_local_to_body;
+      revised_local_to_body.setIdentity();
+      revised_local_to_body.translation() = local_to_body.translation();
+      revised_local_to_body.rotate(revised_local_to_body_quat);
       
       // 4. Set the Head pose using the merged orientation:
       if (cl_cfg_.verbose){
         std::stringstream ss4;
-        print_Isometry3d(revised_local_to_head, ss4);
-        quat_to_euler(  Eigen::Quaterniond(revised_local_to_head.rotation()) , rpy[0], rpy[1], rpy[2]);
+        print_Isometry3d(revised_local_to_body, ss4);
+        quat_to_euler(  Eigen::Quaterniond(revised_local_to_body.rotation()) , rpy[0], rpy[1], rpy[2]);
         std::cout << "local_revhead: " << ss4.str() << " | "<< 
           rpy[0]*180/M_PI << " " << rpy[1]*180/M_PI << " " << rpy[2]*180/M_PI << "\n";        
       }
-      estimator_->setBodyPose(revised_local_to_head);
+      estimator_->setBodyPose(revised_local_to_body);
 
       // Publish the Position of the floating head:
-      estimator_->publishUpdate(utime, revised_local_to_head, cl_cfg_.output_signal, false);
+      estimator_->publishUpdate(utime, revised_local_to_body, cl_cfg_.output_signal, false);
 
 
 
@@ -571,6 +581,7 @@ int main(int argc, char **argv){
   cl_cfg.camera_config = "CAMERA";
   cl_cfg.input_channel = "CAMERA";
   cl_cfg.output_signal = "POSE_BODY";
+  cl_cfg.output_signal_at_10Hz = FALSE;
   cl_cfg.feature_analysis = FALSE; 
   cl_cfg.fusion_mode = 0;
   cl_cfg.verbose = false;
@@ -582,10 +593,12 @@ int main(int argc, char **argv){
   std::string param_file = ""; // actual file
   cl_cfg.param_file = ""; // full path to file
   cl_cfg.draw_lcmgl = FALSE;  
+  double processing_rate = 1; // real time
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
   parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_BODY and POSE_BODY_ALT signals");
+  parser.add(cl_cfg.output_signal_at_10Hz, "s", "output_signal_at_10Hz", "Output POSE_BODY_10HZ on the camera CB");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");  
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 rpy, 3 rp only, (both continuous)");
@@ -598,6 +611,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
+  parser.add(processing_rate, "pr", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
@@ -615,8 +629,7 @@ int main(int argc, char **argv){
     printf("running from log file: %s\n", cl_cfg.in_log_fname.c_str());
     //std::string lcmurl = "file://" + in_log_fname + "?speed=0";
     std::stringstream lcmurl;
-    //lcmurl << "file://" << in_log_fname << "?speed=" << processing_rate << "&start_timestamp=" << begin_timestamp;
-    lcmurl << "file://" << cl_cfg.in_log_fname ;
+    lcmurl << "file://" << cl_cfg.in_log_fname << "?speed=" << processing_rate;
     lcm_recv = boost::shared_ptr<lcm::LCM>(new lcm::LCM(lcmurl.str()));
     if (!lcm_recv->good()) {
       fprintf(stderr, "Error couldn't load log file %s\n", lcmurl.str().c_str());

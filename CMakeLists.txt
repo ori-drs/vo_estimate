@@ -19,6 +19,9 @@ add_subdirectory(src/registeration)
 add_subdirectory(src/motion_estimate_ypr_only)
 add_subdirectory(src/blacken_image)
 
+add_subdirectory(src/tools)
+
+
 pods_install_python_script(spoof-driving-posture scripts/spoof_driving_posture.py)
 
 # Unit Testing
