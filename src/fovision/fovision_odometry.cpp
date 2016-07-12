@@ -58,6 +58,8 @@ struct CommandLineConfig
   bool draw_lcmgl;
 };
 
+std::ofstream fovision_output_file_;
+
 class StereoOdom{
   public:
     StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_);
@@ -182,6 +184,11 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, body_to_imu_);
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "imu", "CAMERA_LEFT", 0, imu_to_camera_);
 
+  if( cl_cfg_.output_signal_at_10Hz ){
+    std::cout << "Opened fovision_pose_body.txt\n";
+    fovision_output_file_.open("fovision_pose_body.txt");
+    fovision_output_file_ << "# utime x y z qw qx qy qz roll pitch yaw\n";
+  }
 
   cout <<"StereoOdom Constructed\n";
 }
@@ -317,14 +324,7 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
   utime_prev_ = utime_cur_;
   utime_cur_ = msg->utime;
 
-  if (cl_cfg_.output_signal_at_10Hz){
-    // Publish the current estimate - using the previous image timestamp
-    // this pose is the latest timestamp 
-    // TODO: decide when and at what stage we want to change the 
-    Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
-    estimator_->publishUpdate(utime_prev_, local_to_body, "POSE_BODY_10HZ", false);
-    //lcm_pub_->publish("CAMERA_REPUBLISH", msg);
-  }
+
 
   // Detect the image stream and process accordingly
   if ( (msg->image_types[0] ==  bot_core::images_t::LEFT) &&
@@ -345,6 +345,24 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
 
   if(cl_cfg_.feature_analysis)
     featureAnalysis();
+
+
+  if (cl_cfg_.output_signal_at_10Hz){
+    // Publish the current estimate
+    Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
+    estimator_->publishUpdate(utime_cur_, local_to_body, "POSE_BODY_10HZ", false);
+    //lcm_pub_->publish("CAMERA_REPUBLISH", msg);
+
+    double current_rpy[3];
+    Eigen::Quaterniond current_quat = Eigen::Quaterniond( local_to_body.rotation() );
+    quat_to_euler( current_quat, current_rpy[0], current_rpy[1], current_rpy[2]);
+    //# utime, x, y, z, qw, qx, qy, qz, roll, pitch, yaw
+    fovision_output_file_ << utime_cur_  << " "
+                    << local_to_body.translation().x() << " " << local_to_body.translation().y() << " " << local_to_body.translation().z() << " "
+                    << current_quat.w() << " " << current_quat.x() << " " << current_quat.y() << " " << current_quat.z() << " "
+                    << current_rpy[0] << " " << current_rpy[1] << " " << current_rpy[2] << "\n";
+    fovision_output_file_.flush();
+  }
 
 }
 
