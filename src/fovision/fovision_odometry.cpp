@@ -201,9 +201,8 @@ void StereoOdom::featureAnalysis(){
   if (counter% cl_cfg_.feature_analysis_publish_period == 0 ){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
-    //features_->setCurrentImages(left_buf_, right_buf_);
     features_->setCurrentCameraPose( estimator_->getCameraPose() );
-    features_->doFeatureProcessing(1); // 1 = send the FEATURES_CUR
+    features_->doFeatureProcessing(true); // use current features
   }
   
   /// Reference Feature Output: ///////////////////////////////////////////////
@@ -216,7 +215,7 @@ void StereoOdom::featureAnalysis(){
         features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , ref_utime_);
         features_->setReferenceImage(left_buf_ref_);
         features_->setReferenceCameraPose( ref_camera_pose_ );
-        features_->doFeatureProcessing(0); // 0 = send the FEATURES_REF
+        //features_->doFeatureProcessing(false); // use reference features
       }
     }
     changed_ref_frames_=false;

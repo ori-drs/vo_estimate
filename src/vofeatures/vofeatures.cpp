@@ -26,6 +26,9 @@ VoFeatures::VoFeatures(boost::shared_ptr<lcm::LCM> &lcm_, int image_width_, int 
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(3001,"Reference Features",1,1, 3000,1,colors_v_g));
   pc_vis_->obj_cfg_list.push_back( obj_cfg(3002,"Current Camera Pose",5,reset) );
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(3003,"Current Features",1,reset, 3002,1,colors_v_b));
+
+  imgutils_ = new image_io_utils( lcm_, image_width_, 2*image_height_); // extra space for stereo tasks
+
 }
 
 // TODO: remove fovis dependency entirely:
@@ -133,18 +136,24 @@ void VoFeatures::setFeatures(const fovis::FeatureMatch* matches, int num_matches
 
 // reference_or_current = 0 send reference (at the change of a key frame change)
 // reference_or_current = 1 send current (otherwise)
-void VoFeatures::doFeatureProcessing(int reference_or_current){
-  if (1==0){ // this only works for old approach
-    writeReferenceImages();
-    writeFeatures(features_ref_);
-    writePose();
+void VoFeatures::doFeatureProcessing(bool useCurrent){
+  if (!useCurrent){
+    std::cout << "write reference features\n";
+    writeImage(left_ref_buf_, output_counter_, utime_);
+    writeFeatures(features_ref_, output_counter_, utime_);
+    writePose(ref_camera_pose_, output_counter_, utime_);
+  }else{
+    std::cout << "write current features\n";
+    writeImage(left_cur_buf_, output_counter_, utime_);
+    writeFeatures(features_cur_, output_counter_, utime_);
+    writePose(cur_camera_pose_, output_counter_, utime_);
   }
 
   
-  if( reference_or_current==0){ // reference
+  if(!useCurrent){ // reference
     sendFeatures(features_ref_,features_ref_indices_, "FEATURES_REF");
     Isometry3dTime ref_camera_poseT = Isometry3dTime(utime_, ref_camera_pose_);
-    sendImage("REF_LEFT",reference_or_current);
+    sendImage("REF_LEFT",left_ref_buf_, features_ref_, features_ref_indices_);
   
     // Send Features paired with the pose at the ref frame:
     pc_vis_->pose_to_lcm_from_list(3000, ref_camera_poseT);
@@ -155,7 +164,7 @@ void VoFeatures::doFeatureProcessing(int reference_or_current){
   }else{ // current
     sendFeatures(features_cur_,features_cur_indices_,"FEATURES_CUR");
     Isometry3dTime cur_camera_poseT = Isometry3dTime(utime_, cur_camera_pose_);
-    sendImage("CUR_LEFT",reference_or_current);
+    sendImage("CUR_LEFT",left_cur_buf_, features_cur_, features_cur_indices_);
 
     // Send Features paired with the pose at the ref frame:
     //pc_vis_->pose_to_lcm_from_list(3000, cur_camera_poseT);
@@ -170,44 +179,29 @@ void VoFeatures::doFeatureProcessing(int reference_or_current){
 }
 
 
-void VoFeatures::drawFeaturesOnImage(cv::Mat &img, int which_image ){
-  cv::Point p;
-  p.x =3; p.y = 10;
+void VoFeatures::drawFeaturesOnImage(cv::Mat &img, std::vector<ImageFeature> &features,
+    std::vector<int> &feature_indices){
   CvScalar color_out = CV_RGB(255,0,0);
-  
-  if (which_image==0){
-    for (size_t j=0;j< features_ref_.size(); j++){
-      if (features_ref_indices_[j]){
-        cv::Point p0;
-        p0.x = features_ref_[j].base_uv[0]; 
-        p0.y = features_ref_[j].base_uv[1];
-        cv::circle( img, p0, 5, color_out, 0 ); 
-      }
-    }  
-  }else{
-    for (size_t j=0;j< features_cur_.size(); j++){
-      if (features_cur_indices_[j]){
-        cv::Point p0;
-        p0.x = features_cur_[j].base_uv[0]; 
-        p0.y = features_cur_[j].base_uv[1];
-        cv::circle( img, p0, 5, color_out, 0 ); 
-      }
-    }  
-  }
+  for (size_t j=0;j< features.size(); j++){
+    if (feature_indices[j]){
+      cv::Point p0;
+      p0.x = features[j].base_uv[0]; 
+      p0.y = features[j].base_uv[1];
+      cv::circle( img, p0, 5, color_out, 0 ); 
+    }
+  }  
 }
 
-void VoFeatures::sendImage(std::string channel, int which_image ){
+void VoFeatures::sendImage(std::string channel, uint8_t* img_buf, std::vector<ImageFeature> &features,
+    std::vector<int> &feature_indices){
   Mat img = Mat::zeros( image_height_, image_width_,CV_8UC1);
-  if (which_image == 0){
-    img.data = left_ref_buf_;
-  }else{
-    img.data = left_cur_buf_;
-  }
+  img.data = img_buf;
 
-  drawFeaturesOnImage(img, which_image);
-  
-  int n_colors=1;
+  drawFeaturesOnImage(img, features, feature_indices);
+  imgutils_->sendImageJpeg(img.data, 0, img.cols, img.rows, 94, channel, 1);
+}
 
+void VoFeatures::publishImage(std::string channel, cv::Mat img, int n_colors){
   bot_core_image_t image;
   image.utime =0;
   image.width = img.cols;
@@ -222,26 +216,22 @@ void VoFeatures::sendImage(std::string channel, int which_image ){
 }
 
 
-void VoFeatures::writeReferenceImages(){
+void VoFeatures::writeImage(uint8_t* img_buf, int counter, int64_t utime){
   //cout << "images written to file @ " << utime_ << "\n";
   std::stringstream ss;
   char buff[10];
-  sprintf(buff,"%0.4d",output_counter_);
-  ss << buff << "_" << utime_;
+  sprintf(buff,"%0.4d",counter);
+  ss << buff << "_" << utime;
   Mat img = Mat::zeros( image_height_, image_width_,CV_8UC1);
-  img.data = left_ref_buf_;
+  img.data = img_buf;
   imwrite( ( ss.str() + "_left.png"), img);
-
-  //Mat imgR = Mat::zeros( image_height_, image_width_,CV_8UC1);
-  //imgR.data = right_ref_buf_;
-  //imwrite( (ss.str() + "_right.png"), imgR);  
 }
 
-void VoFeatures::writeFeatures(std::vector<ImageFeature> features){
+void VoFeatures::writeFeatures(std::vector<ImageFeature> features, int counter, int64_t utime){
   std::stringstream ss;
   char buff[10];
-  sprintf(buff,"%0.4d",output_counter_);
-  ss << buff << "_" << utime_;
+  sprintf(buff,"%0.4d",counter);
+  ss << buff << "_" << utime;
 
   std::fstream feat_file;
   string fname = string(  ss.str() + ".feat");
@@ -265,11 +255,11 @@ void VoFeatures::writeFeatures(std::vector<ImageFeature> features){
 }
 
 
-void VoFeatures::writePose(){
+void VoFeatures::writePose(Eigen::Isometry3d pose, int counter, int64_t utime){
   std::stringstream ss;
   char buff[10];
-  sprintf(buff,"%0.4d",output_counter_);
-  ss << buff << "_" << utime_;
+  sprintf(buff,"%0.4d",counter);
+  ss << buff << "_" << utime;
 
   std::fstream feat_file;
   string fname = string(  ss.str() + ".pose");

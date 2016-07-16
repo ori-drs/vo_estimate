@@ -54,7 +54,7 @@ using namespace boost::assign; // bring 'operator+()' into scope
 
 class RegApp{
   public:
-    RegApp(boost::shared_ptr<lcm::LCM> &publish_lcm, std::string camera_);
+    RegApp(boost::shared_ptr<lcm::LCM> &publish_lcm, std::string camera_, RegisterationConfig reg_cfg);
     
     ~RegApp(){
     }
@@ -96,7 +96,7 @@ class RegApp{
 
 
 
-RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, std::string camera_):          
+RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, std::string camera_, RegisterationConfig reg_cfg):          
     lcm_(lcm_),camera_(camera_), registeration_mode_(0){
 
   botparam_ = bot_param_new_from_server( lcm_->getUnderlyingLCM() , 0);
@@ -112,7 +112,7 @@ RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, std::string camera_):
   // In progress:
   lcm_->subscribe("MAP_CREATE",&RegApp::registerCommandHandler,this);  
 
-  reg = Reg::Ptr (new Reg (lcm_));
+  reg = Reg::Ptr (new Reg (lcm_, reg_cfg));
   
   image_queue_ = new deque< bot_core::image_t > ();
   laser_queue_ = new deque< bot_core::planar_lidar_t > ();
@@ -413,6 +413,11 @@ void RegApp::lidarHandler(const lcm::ReceiveBuffer* rbuf, const std::string& cha
 
 
 int main( int argc, char** argv ){
+  RegisterationConfig reg_cfg;
+  reg_cfg.min_inliers = 60; // 60 used by Hordur, might want to use a higher number
+  reg_cfg.verbose = FALSE;
+  reg_cfg.publish_diagnostics = FALSE;
+
   ConciseArgs parser(argc, argv, "registeration-app");
   string camera="CAMLCM_IMAGE_GRAY_LEFT";
   parser.add(camera, "c", "camera", "Camera channel");
@@ -425,7 +430,7 @@ int main( int argc, char** argv ){
     std::cerr <<"ERROR: lcm is not good()" <<std::endl;
   }
   
-  RegApp app(lcm, camera);
+  RegApp app(lcm, camera, reg_cfg);
   cout << "registeration is ready" << endl << endl;
   while(0 == lcm->handle());
   return 0;

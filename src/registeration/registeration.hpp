@@ -7,25 +7,30 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d/features2d.hpp>
 
-#include <bot_lcmgl_client/lcmgl.h>
 #include <estimate-pose/pose_estimator.hpp>
 
 #include <pronto_utils/pronto_lcm.hpp>
 #include <pronto_utils/pronto_vis.hpp>
 
+#include <bot_param/param_client.h>
+#include <bot_frames/bot_frames.h>
+#include <bot_frames_cpp/bot_frames_cpp.hpp>
 
-struct ImageFeature{
-  int track_id;
-  Eigen::Vector2d uv; ///< unrectified, distorted, orig. coords
-  Eigen::Vector2d base_uv; ///< unrectified, distorted, base level
-  Eigen::Vector3d uvd; ///< rectified, undistorted, base level
-  Eigen::Vector3d xyz;
-  Eigen::Vector4d xyzw;
-  uint8_t color[3];
+#include <image_io_utils/image_io_utils.hpp> // to simplify jpeg/zlib compression and decompression
 
-  // @todo what more is needed?
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+#include "drcvision/voconfig.hpp"
+#include "drcvision/vofeatures.hpp"
+
+
+struct RegisterationConfig
+{
+  int min_inliers; // 60 used by Hordur, might want to use a higher number
+  bool verbose;
+  bool publish_diagnostics;
+  bool use_cv_show; // use open cv show popup (blocks thread)
+  std::string param_file;
 };
+
 
 struct FrameMatch{
   std::vector<int> featuresA_indices;
@@ -34,9 +39,12 @@ struct FrameMatch{
   std::vector<ImageFeature> featuresA;
   std::vector<ImageFeature> featuresB;
   
-  pose_estimator::PoseEstimateStatus status; // 0 = sucess, 0 = too few matches, 1 = too few inliers
+  pose_estimator::PoseEstimateStatus status; 
+  // Modes: SUCCESS, INSUFFICIENT_INLIERS,  OPTIMIZATION_FAILURE, REPROJECTION_ERROR
   Eigen::Isometry3d delta; // A->B transform : where is B relative to A
   int n_inliers;
+  int n_registeration_inliers; // number of inliers retried from the transfromation estimation
+  // TODO: not sure if these are different 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
@@ -49,16 +57,14 @@ class Reg
     typedef boost::shared_ptr<Reg> Ptr;
     typedef boost::shared_ptr<const Reg> ConstPtr;
     
-    Reg (boost::shared_ptr<lcm::LCM> &lcm_);
+    Reg (boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_);
+
+    void read_features(std::string fname,
+        std::vector<ImageFeature>& features);
     
     void align_images(cv::Mat &img0, cv::Mat &img1, 
                            std::vector<ImageFeature> &features0, std::vector<ImageFeature> &features1,
                            int64_t utime0, int64_t utime1, FrameMatchPtr &match);
-    
-    
-    void draw_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
-                           Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1);
-    void draw_reg(std::vector<ImageFeature> features,    int status, Eigen::Isometry3d pose);
     
     void send_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
         Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1,
@@ -72,12 +78,24 @@ class Reg
     void send_lcm_image(cv::Mat &img, std::string channel );
 
   private:
+    const RegisterationConfig reg_cfg_;    
+
     boost::shared_ptr<lcm::LCM> lcm_;
-    bot_lcmgl_t* lcmgl_;
 
     pronto_vis* pc_vis_;
-    bool verbose_;
-    
+
+    VoFeatures* features_;   
+    BotParam* botparam_;
+    BotFrames* botframes_;
+    bot::frames* botframes_cpp_;
+    voconfig::KmclConfiguration* config_;
+
+
+    image_io_utils*  imgutils_;
+
+    int min_inliers_;
+    Eigen::Matrix<double, 3, 4> projection_matrix_;
+
 };
 
 #endif

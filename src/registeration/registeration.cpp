@@ -36,19 +36,61 @@
 
 using namespace std;
 
-//lcm_t* _bot_param_lcm;
-//pronto_vis* pc_vis_;
 
+Reg::Reg(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
+        lcm_(lcm_),reg_cfg_(reg_cfg_){
+  std::string camera_config = "CAMERA";
+  min_inliers_ = 60; // used by Hordur
 
+  // Set up frames and config:
+  if (reg_cfg_.param_file.empty()) {
+    std::cout << "Get param from LCM\n";
+    botparam_ = bot_param_get_global(lcm_->getUnderlyingLCM(), 0);
+  } else {
+    std::cout << "Get param from file\n";
+    botparam_ = bot_param_new_from_file(reg_cfg_.param_file.c_str());
+  }
+  if (botparam_ == NULL) {
+    exit(1);
+  }
+  botframes_= bot_frames_get_global(lcm_->getUnderlyingLCM(), botparam_);
+  botframes_cpp_ = new bot::frames(botframes_);
 
+  config_ = new voconfig::KmclConfiguration(botparam_, camera_config);
+  boost::shared_ptr<fovis::StereoCalibration> stereo_calibration_;
+  stereo_calibration_ = boost::shared_ptr<fovis::StereoCalibration>(config_->load_stereo_calibration());
 
-Reg::Reg(boost::shared_ptr<lcm::LCM> &lcm_):
-        lcm_(lcm_){
-          
-  lcmgl_= bot_lcmgl_init(lcm_->getUnderlyingLCM(), "registeration");
+  fovis::CameraIntrinsicsParameters cip = stereo_calibration_->getRectifiedParameters();
+  // fx 0  cx 0
+  // 0  fy cy 0
+  // 0  0  0  0
+  projection_matrix_ << cip.fx,  0, cip.cx, 0,
+                       0, cip.fy,  cip.cy, 0,
+                       0,   0,   1, 0;
 
+  // from newcollege_stereo config: (left)
+  //projection_matrix_ << 389.956085,  0, 254.903519, 0,
+  //                     0, 389.956085,  201.899490, 0,
+  //                     0,   0,   1, 0;
 
-  int reset =0;
+  // bumblebee left:
+  //projection_matrix_ << 836.466,  0, 513.198, 0,
+  //                     0, 835.78,  397.901, 0,
+  //                     0,   0,   1, 0;
+      
+  // loader multisense left:
+  //projection_matrix_ << 606.0344848632812,  0, 512.0, 0,
+  //                     0, 606.0344848632812,  272.0, 0,
+  //                     0,   0,   1, 0;
+
+  // husky unit 44
+  // projection_matrix_ << 580.5900268554688,  0, 512.0, 0,
+  //                     0, 580.5900268554688,  512.0, 0,
+  //                     0,   0,   1, 0;
+
+  imgutils_ = new image_io_utils( lcm_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
+
+  int reset =1;
   // Vis Config:
   pc_vis_ = new pronto_vis(lcm_->getUnderlyingLCM());
   float colors_0f[] ={1.0,0.0,0.0};
@@ -60,61 +102,20 @@ Reg::Reg(boost::shared_ptr<lcm::LCM> &lcm_):
 
   // obj: id name type reset
   // pts: id name type reset objcoll usergb rgb
-  pc_vis_->obj_cfg_list.push_back( obj_cfg(1000,"Pose A",5,reset) );
+  pc_vis_->obj_cfg_list.push_back( obj_cfg(1000,"Pose A",5,0) );
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(1002,"Cloud A"     ,1,reset, 1000,1,colors_0));
   colors_0[0] = 0.7;
   colors_0[1] = 0.7;
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(1001,"Cloud A - inliers"     ,1,reset, 1000,1,colors_0));
 
-  pc_vis_->obj_cfg_list.push_back( obj_cfg(2000,"Pose B",5,reset) );
+  pc_vis_->obj_cfg_list.push_back( obj_cfg(2000,"Pose B",5,0) );
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(2002,"Cloud B"     ,1,reset, 2000,1,colors_1));
   colors_1[1] = 0.7;
   colors_1[2] = 0.7;
   pc_vis_->ptcld_cfg_list.push_back( ptcld_cfg(2001,"Cloud B - inliers"     ,1,reset, 2000,1,colors_1));
-            
-  verbose_ =false;
-}
 
-void Reg::draw_reg(std::vector<ImageFeature> features,    int status, Eigen::Isometry3d pose)
-{
-  // reorder as:
-  // z, -x, -y (or 2,-0,-1)
+  features_ = new VoFeatures(lcm_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
 
-  bot_lcmgl_push_matrix(lcmgl_);
-  bot_lcmgl_rotated(lcmgl_, -90, 0, 0, 1);
-  bot_lcmgl_rotated(lcmgl_, -90, 1, 0, 0);
-
-
-//  bot_lcmgl_translated(_lcmgl, 0, pose.translation().y(), 0);
-
-
-  bot_lcmgl_color3f(lcmgl_, 0, 1, 1);
-  bot_lcmgl_point_size(lcmgl_, 1.5f);
-  bot_lcmgl_begin(lcmgl_, GL_POINTS);
-
-  if (status==0){
-    bot_lcmgl_color3f(lcmgl_, 0, 0, 1);
-  }else{ // status 1 when changing key frames:
-    bot_lcmgl_color3f(lcmgl_, 1, 0, 0);
-  }
-  for (size_t i=0; i < features.size(); ++i) {
-    ImageFeature f = features[i];
-
-    bot_lcmgl_vertex3f(lcmgl_, f.xyz[0],  f.xyz[1], f.xyz[2]);
-//    bot_lcmgl_vertex3f(lcmgl_, f.xyz[2],  -f.xyz[0],-f.xyz[1]);
-  }
-  bot_lcmgl_end(lcmgl_);
-  bot_lcmgl_pop_matrix(lcmgl_);
-
-  // disabling this allows draw_reg to daisy chain onto draw()
-  //bot_lcmgl_switch_buffer(lcmgl_);
-}
-
-void Reg::draw_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
-    Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1){
-  draw_reg(features0,    0,  pose0);
-  draw_reg(features1,    1, pose1);
-  bot_lcmgl_switch_buffer(lcmgl_);
 }
 
 
@@ -262,10 +263,10 @@ void compute_descriptors(cv::Mat &image, vector<ImageFeature> & features, std::s
 }
 
 
-void read_features(std::string fname,
+void Reg::read_features(std::string fname,
     std::vector<ImageFeature>& features ){
 
-  printf( "About to read: %s - ",fname.c_str());
+  //printf( "About to read: %s - ",fname.c_str());
   int counter=0;
   string line0;
   std::ifstream myfile (fname.c_str());
@@ -297,7 +298,6 @@ void read_features(std::string fname,
         f.color[0] = d[0];f.color[1] = d[1];f.color[2] = d[2];
 
         /*
-
         cout << line << " is line\n";
         cout << "i: " << i <<"\n";
         cout << "f.track_id: " << f.track_id <<"\n";
@@ -316,11 +316,11 @@ void read_features(std::string fname,
     printf( "Unable to open features file\n%s",fname.c_str());
     return;
   }
-  cout << "read " << features.size() << " features\n";
+  //cout << "read " << features.size() << " features\n";
 }
 
 
-Eigen::Isometry3d pose_estimate(FrameMatchPtr match,
+void pose_estimate(FrameMatchPtr match,
     std::vector<char> & inliers,
     Eigen::Isometry3d & motion,
     Eigen::MatrixXd & motion_covariance,
@@ -372,42 +372,27 @@ Eigen::Isometry3d pose_estimate(FrameMatchPtr match,
   match->status = status;
   match->delta = motion;
 
-  /*
-  int num_inliers = std::accumulate(inliers.begin(), inliers.end(), 0);
-  const char* str_status = PoseEstimateStatusStrings[status];
-  std::cerr << "Motion: " << str_status << " feats: " << match->featuresA_indices.size()
-            << " inliers: " << num_inliers
-            << " Pose: " << motion
-            << " Delta: " << match->delta
-            //<< " Cov:\n" << motion_covariance << "\n"
-            << " " << match->timeA << " " << match->timeB << std::endl;
-   */
-
-  return motion;
 }
 
-
-void Reg::send_lcm_image(cv::Mat &img, std::string channel ){
-  int n_colors=3;
-
-  bot_core_image_t image;
-  image.utime =0;
-  image.width = img.cols;
-  image.height= img.rows;
-  image.row_stride =n_colors*img.cols;
-  image.pixelformat =BOT_CORE_IMAGE_T_PIXEL_FORMAT_RGB;
-  image.size =n_colors*img.cols*img.rows;
-  image.data = img.data;
-  image.nmetadata =0;
-  image.metadata = NULL;
-  bot_core_image_t_publish( lcm_->getUnderlyingLCM() , channel.c_str(), &image);    
-  
-}
 
 
 void Reg::align_images(cv::Mat &img0, cv::Mat &img1, 
                            std::vector<ImageFeature> &features0, std::vector<ImageFeature> &features1,
                            int64_t utime0, int64_t utime1, FrameMatchPtr &match){
+
+  // 1. Publish the original images with the features drawn on them
+  if (reg_cfg_.publish_diagnostics){ 
+    std::vector<int> fake_indices0(features0.size());
+    for(int x = 0; x < features0.size(); ++x)
+       fake_indices0[x] = 1;
+    features_->sendImage("IMG0",img0.data, features0, fake_indices0);
+
+    std::vector<int> fake_indices1(features1.size());
+    for(int x = 0; x < features1.size(); ++x)
+       fake_indices1[x] = 1;
+    features_->sendImage("IMG1",img1.data, features1, fake_indices1);
+  }
+
     /// 2. Extract Image Descriptors:
   std::vector<cv::KeyPoint> keypoints0, keypoints1;
   cv::Mat descriptors0, descriptors1;
@@ -416,9 +401,9 @@ void Reg::align_images(cv::Mat &img0, cv::Mat &img1,
   compute_descriptors(img0, features0, desc_name, extractor,descriptors0,keypoints0);
   compute_descriptors(img1, features1, desc_name, extractor,descriptors1,keypoints1);
 
-  if (verbose_){
-    cout << descriptors0.rows << "descripters in 0\n";
-    cout << descriptors1.rows << "descripters in 1\n";
+  if (reg_cfg_.verbose){
+    cout << descriptors0.rows << " descripters in 0 | "
+         << descriptors1.rows << " descripters in 1\n";
   }
 
 
@@ -439,26 +424,27 @@ void Reg::align_images(cv::Mat &img0, cv::Mat &img1,
       matches1in0.begin(), matches1in0.end(),
       std::back_inserter(matches),
       DMatch_lt);
-  if (verbose_){
-    std::cout << matches0in1.size() << " matches0in1 found\n";
-    std::cout << matches1in0.size() << " matches1in0 found\n";
-    std::cout << matches.size() << " intersect matches found\n";
+  if (reg_cfg_.verbose){
+    std::cout << matches0in1.size() << " matches0in1 | "
+              << matches1in0.size() << " matches1in0 | "
+              << matches.size() << " intersecting matches found\n";
   }
 
   /// 3c Draw descriptor matches
   cv::Mat img_matches0in1, img_matches1in0;
   cv::drawMatches( img0, keypoints0, img1, keypoints1, matches0in1, img_matches0in1 );
-//  imshow("Matches0in1", img_matches0in1 );
+  //imshow("Matches0in1", img_matches0in1 );
+  //cv::waitKey(0);  
 
   cv::drawMatches( img0, keypoints0, img1, keypoints1, matches1in0, img_matches1in0  );
- // imshow("Matches1in0 [matches1in0 reordered]", img_matches1in0 );
+  //imshow("Matches1in0 [matches1in0 reordered]", img_matches1in0 );
+  //cv::waitKey(0);  
 
   cv::Mat img_matches_inter;
   cv::drawMatches( img0, keypoints0, img1, keypoints1, matches, img_matches_inter );
- // imshow("Matches Intersection", img_matches_inter );
-
+  //imshow("Matches Intersection", img_matches_inter );
   
-  /// 4 Get delta pose estimate:
+  /// 4 Pair up Matches: (TODO: understand this better)
   std::vector<int> idxA;
   std::vector<int> idxB;
   for (size_t i = 0; i < descriptors0.rows; ++i){
@@ -493,54 +479,18 @@ void Reg::align_images(cv::Mat &img0, cv::Mat &img1,
     match->featuresB.push_back(feature);
   }
 
-
-
   BOOST_FOREACH (cv::DMatch& dmatch, matches) {
     //dmatch.queryIdx = idxA[dmatch.queryIdx];
     //dmatch.trainIdx = idxB[dmatch.trainIdx];
   }
+
+  // 5 find the motion transform between to images
   if (matches.size() >= 3) {
-    Eigen::Isometry3d delta;
-    delta.setIdentity();
+
     Eigen::MatrixXd covariance;
+    pose_estimate(match, inliers, motion, covariance,
+        projection_matrix_);
 
-    Eigen::Matrix<double, 3, 4> projection_matrix;
-    // fx 0  cx 0
-    // 0  fy cy 0
-    // 0  0  0  0
-    // from newcollege_stereo config: (left)
-    //projection_matrix << 389.956085,  0, 254.903519, 0,
-    //                     0, 389.956085,  201.899490, 0,
-    //                     0,   0,   1, 0;
-
-    // bumblebee left:
-    //projection_matrix << 836.466,  0, 513.198, 0,
-    //                     0, 835.78,  397.901, 0,
-    //                     0,   0,   1, 0;
-        
-    // loader multisense left:
-    projection_matrix << 606.0344848632812,  0, 512.0, 0,
-                         0, 606.0344848632812,  272.0, 0,
-                         0,   0,   1, 0;
-
-    delta = pose_estimate(match, inliers, motion, covariance,
-        projection_matrix);
-
-    Eigen::Quaterniond delta_quat = Eigen::Quaterniond(delta.rotation());
-    if(verbose_){
-      cout << delta.translation().x() << " "
-        << delta.translation().y() << " "
-        << delta.translation().z() << " | "
-        << delta_quat.w() << " "
-        << delta_quat.x() << " "
-        << delta_quat.y() << " "
-        << delta_quat.z() << "\n";
-    }
-
-    Eigen::Isometry3d nullpose;
-    nullpose.setIdentity();
-    //    draw_both_reg(features0, features1,nullpose0,delta);
-    draw_both_reg(features0, features1,nullpose,delta);
 
     size_t j = 0;
     for (size_t i = 0; i < inliers.size(); ++i){
@@ -550,31 +500,66 @@ void Reg::align_images(cv::Mat &img0, cv::Mat &img1,
         j++;
       }
     }
+
     match->featuresA_indices.resize(j);
     match->featuresB_indices.resize(j);
     match->n_inliers = inliers.size();//
-    //cout << inliers.size() << " inliers found\n";
-    if (match->status == pose_estimator::SUCCESS){ // used 15 earlier... ask Hordur
-      if (verbose_){
-	      // all the features:
-	      send_both_reg(features0, features1,delta,nullpose, utime0, utime1);
-      
-        // just the inliers:
-        send_both_reg_inliers(features0, features1,nullpose,delta, 
-                        match->featuresA_indices, match->featuresB_indices,
-                        utime0, utime1);
-      }
+    match->n_registeration_inliers = std::accumulate(inliers.begin(), inliers.end(), 0);
 
-      // Draw the inlier set:
-      cv::Mat img_copy = img_matches_inter ;
-      draw_inliers(img_copy,features0, features1,match->featuresA_indices, match->featuresB_indices);
-      //    imshow("Matches Inliers", img_copy);
-      send_lcm_image(img_copy, "REGISTERATION" );
-    }
   } else {
     // TODO: this should have a different code e.g. insufficient matches:
     match->status = pose_estimator::INSUFFICIENT_INLIERS;
-    num_inliers = 0;
+    match->n_registeration_inliers = 0;
   }
+
+  
+
+  if (match->n_registeration_inliers >= reg_cfg_.min_inliers) {
+    match->status = pose_estimator::SUCCESS;
+  } else {
+    match->status = pose_estimator::INSUFFICIENT_INLIERS;
+  }
+
+
+  // 6 Output diagnostics
+  if( reg_cfg_.verbose){
+    Eigen::Quaterniond delta_quat = Eigen::Quaterniond(match->delta.rotation());
+    cout << match->delta.translation().x() << " "
+      << match->delta.translation().y() << " "
+      << match->delta.translation().z() << " | "
+      << delta_quat.w() << " "
+      << delta_quat.x() << " "
+      << delta_quat.y() << " "
+      << delta_quat.z() << " | inliers: "
+      << match->n_registeration_inliers << "\n";
+  }
+
+  if (match->status == pose_estimator::SUCCESS){
+    // Draw the inlier set:
+    draw_inliers(img_matches_inter,features0, features1,match->featuresA_indices, match->featuresB_indices);
+
+    if (reg_cfg_.publish_diagnostics){
+      Eigen::Isometry3d nullpose;
+      nullpose.setIdentity();
+
+      // all the features:
+      if (reg_cfg_.publish_diagnostics)
+        send_both_reg(features0, features1,match->delta,nullpose, utime0, utime1);
+    
+      // just the inliers:
+      send_both_reg_inliers(features0, features1,nullpose,match->delta, 
+                      match->featuresA_indices, match->featuresB_indices,
+                      utime0, utime1);
+
+      imgutils_->sendImageJpeg(img_matches_inter.data, 0, img_matches_inter.cols, img_matches_inter.rows, 94, "REGISTERATION", 3);
+    }
+  }
+
+
+  if (reg_cfg_.use_cv_show)
+    imshow("Matches Inliers", img_matches_inter);
+
+  if (reg_cfg_.use_cv_show)
+    cv::waitKey(0);  
 
 }

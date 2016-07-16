@@ -20,6 +20,7 @@
 
 #include "imagefeatures.hpp"
 #include <pronto_utils/pronto_vis.hpp> // visualize pt clds
+#include <image_io_utils/image_io_utils.hpp> // to simplify jpeg/zlib compression and decompression
 
 #include <lcmtypes/motion_estimate.hpp>
 #include <lcmtypes/bot_core_image_t.h>
@@ -57,8 +58,9 @@ public:
     cur_camera_pose_ = cur_camera_pose;
   }
 
-  void doFeatureProcessing(int reference_or_current);
-  void sendImage(std::string channel, int which_image );
+  void doFeatureProcessing(bool useCurrent);
+  void sendImage(std::string channel, uint8_t *img_buf, std::vector<ImageFeature> &features,
+    std::vector<int> &feature_indices);
 private:
   boost::shared_ptr<lcm::LCM> lcm_;
   pronto_vis* pc_vis_;
@@ -66,16 +68,18 @@ private:
   int image_height_;
   int output_counter_;
   
-  void writeReferenceImages();
-  void writeFeatures(std::vector<ImageFeature> features);
-  void writePose();
+  void writeImage(uint8_t* img_buf, int counter, int64_t utime);
+  void writeFeatures(std::vector<ImageFeature> features, int counter, int64_t utime);
+  void writePose(Eigen::Isometry3d pose, int counter, int64_t utime);
   void sendFeatures(std::vector<ImageFeature> features, 
                     std::vector<int> features_indices, std::string channel);
   void sendFeaturesAsCollection(std::vector<ImageFeature> features, 
                                 std::vector<int> features_indices,
                                 int vs_id);
+  void publishImage(std::string channel, cv::Mat img, int n_colors);
   
-  void drawFeaturesOnImage(cv::Mat &img, int which_image );
+  void drawFeaturesOnImage(cv::Mat &img, std::vector<ImageFeature> &features,
+    std::vector<int> &feature_indices);
 
   // All the incoming data and state:
   Eigen::Isometry3d ref_camera_pose_, cur_camera_pose_;
@@ -88,6 +92,8 @@ private:
   uint8_t *left_cur_buf_;
   std::vector<ImageFeature> features_cur_;
   std::vector<int> features_cur_indices_;
+
+  image_io_utils*  imgutils_;
 
   // no longer used:
   // uint8_t *right_ref_buf_, *right_cur_buf_;
