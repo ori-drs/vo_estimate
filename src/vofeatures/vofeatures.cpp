@@ -138,10 +138,10 @@ void VoFeatures::setFeatures(const fovis::FeatureMatch* matches, int num_matches
 // reference_or_current = 1 send current (otherwise)
 void VoFeatures::doFeatureProcessing(bool useCurrent){
   if (!useCurrent){
-    std::cout << "write reference features\n";
-    writeImage(left_ref_buf_, output_counter_, utime_);
-    writeFeatures(features_ref_, output_counter_, utime_);
-    writePose(ref_camera_pose_, output_counter_, utime_);
+  //  std::cout << "write reference features\n";
+  //  writeImage(left_ref_buf_, output_counter_, utime_);
+  //  writeFeatures(features_ref_, output_counter_, utime_);
+  //  writePose(ref_camera_pose_, output_counter_, utime_);
   }else{
     std::cout << "write current features\n";
     writeImage(left_cur_buf_, output_counter_, utime_);
@@ -256,24 +256,28 @@ void VoFeatures::writeFeatures(std::vector<ImageFeature> features, int counter, 
 
 
 void VoFeatures::writePose(Eigen::Isometry3d pose, int counter, int64_t utime){
-  std::stringstream ss;
-  char buff[10];
-  sprintf(buff,"%0.4d",counter);
-  ss << buff << "_" << utime;
 
-  std::fstream feat_file;
-  string fname = string(  ss.str() + ".pose");
-  feat_file.open(  fname.c_str() , std::fstream::out);
-  feat_file << "#utime,pos_x,pos_y,pos_z,quat_w,quat_x,quat_y,quat_z\n";
-  
-  Eigen::Vector3d t(ref_camera_pose_.translation());
-  Eigen::Quaterniond r(ref_camera_pose_.rotation());
-  feat_file <<utime_<< "," << t[0]<<","<<t[1]<<","<<t[2]<<"," 
-       <<r.w()<<","<<r.x()<<","<<r.y()<<","<<r.z() ;
-  
-  
-  
-  feat_file.close();
+  if(!output_pose_file_.is_open()){
+    std::cout << "pose_trajectory.txt file not open, opening it\n";
+    output_pose_file_.open(  "pose_trajectory.txt" , std::fstream::out);
+    output_pose_file_ << "# utime x y z qw qx qy qz roll pitch yaw\n";
+    output_pose_file_.flush();
+  }
+
+  double pose_rpy[3];
+  Eigen::Quaterniond pose_quat = Eigen::Quaterniond( pose.rotation() );
+  quat_to_euler( pose_quat, pose_rpy[0], pose_rpy[1], pose_rpy[2]);
+
+  if(output_pose_file_.is_open()){
+    output_pose_file_ << utime  << " "
+                    << pose.translation().x() << " " << pose.translation().y() << " " << pose.translation().z() << " "
+                    << pose_quat.w() << " " << pose_quat.x() << " " << pose_quat.y() << " " << pose_quat.z() << " "
+                    << pose_rpy[0] << " " << pose_rpy[1] << " " << pose_rpy[2] << "\n";
+    output_pose_file_.flush();                   
+  }else{
+    std::cout << "file not open still\n";
+  }
+
 }
 
 void VoFeatures::sendFeaturesAsCollection(std::vector<ImageFeature> features, 

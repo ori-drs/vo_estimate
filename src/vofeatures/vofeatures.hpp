@@ -97,6 +97,8 @@ private:
 
   // no longer used:
   // uint8_t *right_ref_buf_, *right_cur_buf_;
+
+  std::fstream output_pose_file_;
 };
 
 #endif
