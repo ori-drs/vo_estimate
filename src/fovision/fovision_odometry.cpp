@@ -475,7 +475,11 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
       Eigen::Isometry3d init_pose;
       init_pose.setIdentity();
       init_pose.translation() << 0,0,0;
-      init_pose.rotate( local_to_body_orientation_from_imu );
+
+      // Take the RPY from the IMU and only use the roll+pitch with zero yaw to init the estimator
+      double rpy_imu[3];
+      quat_to_euler(  local_to_body_orientation_from_imu , rpy_imu[0], rpy_imu[1], rpy_imu[2]);
+      init_pose.rotate( euler_to_quat( rpy_imu[0], rpy_imu[1], 0) );
       estimator_->setBodyPose(init_pose);
       pose_initialized_ = true;
       cout << "got first IMU measurement\n";
