@@ -7,7 +7,7 @@
 // match 0050 from snippet 3 to all the images in snippet_2
 // drc-registeration-batch  -P husky/robot.cfg   -f snippet_2/  -r snippet_3/0050_1465298302290122
 // Result: matches to images 43, 49, 50, 51 in snipper 2
-// 
+//
 //
 // July 2016
 
@@ -155,11 +155,30 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
     }
   }
 
-for (size_t i=0; i<match_results.size(); i++)
-  std::cout << match_results[i]->counter << " "
-            << match_results[i]->match->n_registeration_inliers << " "
-            << match_results[i]->name << " "
-            << " " << match_results[i]->match->status << "\n";
+  for (size_t i=0; i<match_results.size(); i++)
+    std::cout << match_results[i]->counter << " "
+              << match_results[i]->name << " "
+              << match_results[i]->match->n_registeration_inliers << " "
+              << match_results[i]->match->status << "\n";
+
+
+  std::ofstream output_file;
+
+  std::stringstream output_filename;
+  output_filename << main_fname << "_reg_output.txt";
+  std::cout << output_filename.str() << " is output filename\n";
+  output_file.open(output_filename.str().c_str());
+  output_file << "# no utime n_registeration_inliers status\n";
+
+  for (size_t i=0; i<match_results.size(); i++){
+    std::string s = match_results[i]->name;
+    std::replace( s.begin(), s.end(), '_', ' '); // replace all '_' to ' '
+    output_file << s << " "
+                << match_results[i]->match->n_registeration_inliers << " "
+                << match_results[i]->match->status << "\n";
+  }
+  output_file.flush();
+  output_file.close();
 
 }
 
