@@ -46,6 +46,7 @@ struct CommandLineConfig
   bool output_signal;
   std::string body_channel;
   bool vicon_init; // initializae off of vicon
+  bool pose_init; // or off of POSE_BODY_ALT
   std::string input_channel;
   bool verbose;
   std::string in_log_fname;
@@ -101,8 +102,11 @@ class StereoOdom{
     void multisenseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void multisenseLDHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void multisenseLRHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
+
     void viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::rigid_transform_t* msg);
-    
+    void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
+    void initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime);
+
     bool pose_initialized_;
     
     Eigen::Isometry3d world_to_camera_;
@@ -149,8 +153,14 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
 
  
   pose_initialized_ = false;
-  if (!cl_cfg_.vicon_init){
-    std::cout << "Init internal est using default\n";
+  if (cl_cfg_.vicon_init){
+    std::cout << "Will Init internal est using VICON_pelvis_val\n";
+    lcm_recv_->subscribe("VICON_pelvis_val",&StereoOdom::viconHandler,this); // |VICON_BODY|VICON_FRONTPLATE
+  }else if(cl_cfg_.pose_init){
+    std::cout << "Will Init internal est using POSE_BODY_ALT\n";
+    lcm_recv_->subscribe("POSE_BODY_ALT",&StereoOdom::poseHandler,this);
+  }else{
+    std::cout << "Init internal est using default pose\n";
 
     // Useful for Atlas logs: initialise with nominal camera frame with the head pointing horizontally
     /*
@@ -174,10 +184,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     world_to_camera_.translation().y() = 0;
     world_to_camera_.translation().z() = 1.65; // nominal head height
 
-
     pose_initialized_ = true;
-  }else{
-    lcm_recv_->subscribe("VICON_BODY|VICON_FRONTPLATE",&StereoOdom::viconHandler,this);
   }
   
   
@@ -417,34 +424,63 @@ static inline bot_core::pose_t getPoseAsBotPose(Eigen::Isometry3d pose, int64_t 
 }
 
 
-void StereoOdom::viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::rigid_transform_t* msg){
-  
-  if ( cl_cfg_.vicon_init && !pose_initialized_ ){
-    std::cout << "Init internal est using Vicon\n";
-  
-    Eigen::Isometry3d worldvicon_to_frontplate_vicon;
-    worldvicon_to_frontplate_vicon.setIdentity();
-    worldvicon_to_frontplate_vicon.translation()  << msg->trans[0], msg->trans[1] , msg->trans[2];
-    Eigen::Quaterniond quat = Eigen::Quaterniond(msg->quat[0], msg->quat[1], 
-                                                msg->quat[2], msg->quat[3]);
-    worldvicon_to_frontplate_vicon.rotate(quat); 
-    
-    // Apply the body to frontplate transform
-    Eigen::Isometry3d frontplate_vicon_to_body_vicon = botframes_cpp_->get_trans_with_utime(botframes_, "body_vicon" , "frontplate_vicon", msg->utime);
-    Eigen::Isometry3d body_to_camera = botframes_cpp_->get_trans_with_utime(botframes_, "CAMERA_LEFT" , "body", msg->utime);
 
-    Eigen::Isometry3d worldvicon_to_camera = worldvicon_to_frontplate_vicon* frontplate_vicon_to_body_vicon * body_to_camera;
-    
-    //bot_core::pose_t pose_msg = getPoseAsBotPose(worldvicon_to_camera, msg->utime);
-    //lcm_pub_->publish("POSE_BODY_ALT", &pose_msg );
-    
-    world_to_camera_ =  worldvicon_to_camera;
-    
-    pose_initialized_ = TRUE;
+void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime){
+
+  // Because body to CAMERA comes through FK, need to get an updated frame (BODY_TO_HEAD)
+  int64_t timestamp;
+  int status  = bot_frames_get_latest_timestamp(botframes_, 
+                                      "CAMERA_LEFT" , "body", &timestamp);    
+  if (timestamp==0){
+    std::cout << "CAMERA_LEFT to body not updated, not initialising yet\n";
+    return;
   }
+
+  Eigen::Isometry3d body_to_camera = botframes_cpp_->get_trans_with_utime(botframes_, "CAMERA_LEFT" , "body", utime);
+  world_to_camera_ = world_to_body_init * body_to_camera;
+
+  std::cout << "Init internal est using Vicon\n";
+  pose_initialized_ = TRUE;    
 
 }
 
+
+void StereoOdom::viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::rigid_transform_t* msg){
+
+  Eigen::Isometry3d world_to_vicon_frame;
+  world_to_vicon_frame.setIdentity();
+  world_to_vicon_frame.translation()  << msg->trans[0], msg->trans[1] , msg->trans[2];
+  Eigen::Quaterniond quat = Eigen::Quaterniond(msg->quat[0], msg->quat[1], 
+                                              msg->quat[2], msg->quat[3]);
+  world_to_vicon_frame.rotate(quat); 
+
+  // Apply the body to frontplate transform and find the camera:
+  //Eigen::Isometry3d vicon_frame_to_body_vicon = botframes_cpp_->get_trans_with_utime(botframes_, "body_vicon" , "frontplate_vicon", msg->utime);
+  Eigen::Isometry3d vicon_frame_to_body_vicon = botframes_cpp_->get_trans_with_utime(botframes_, "body_vicon" , "vicon_frame", msg->utime);
+  Eigen::Isometry3d world_to_body_vicon = world_to_vicon_frame* vicon_frame_to_body_vicon;
+
+  // Also publish back Vicon pose, if required
+  bot_core::pose_t pose_msg = getPoseAsBotPose(world_to_body_vicon, msg->utime);
+  lcm_pub_->publish("POSE_VICON", &pose_msg );
+
+  if ( cl_cfg_.vicon_init && !pose_initialized_ ){ // Only Initialise once
+    initialiseCameraPose(world_to_body_vicon, msg->utime);
+  }
+}
+
+void StereoOdom::poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg){
+
+  Eigen::Isometry3d world_to_body_alt;
+  world_to_body_alt.setIdentity();
+  world_to_body_alt.translation()  << msg->pos[0], msg->pos[1] , msg->pos[2];
+  Eigen::Quaterniond quat = Eigen::Quaterniond(msg->orientation[0], msg->orientation[1], 
+                                              msg->orientation[2], msg->orientation[3]);
+  world_to_body_alt.rotate(quat); 
+
+  if ( cl_cfg_.pose_init && !pose_initialized_ ){ // Only Initialise once
+    initialiseCameraPose(world_to_body_alt, msg->utime);
+  }
+}
 
 
 
@@ -457,6 +493,7 @@ int main(int argc, char **argv){
   cl_cfg.body_channel = "POSE_BODY_USING_CAMERA";
   cl_cfg.feature_analysis = FALSE; 
   cl_cfg.vicon_init = FALSE;
+  cl_cfg.pose_init = FALSE;  
   cl_cfg.fusion_mode = 0;
   cl_cfg.output_extension = "";
   cl_cfg.in_log_fname = "";
@@ -471,7 +508,8 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");    
-  parser.add(cl_cfg.vicon_init, "v", "vicon_init", "Bootstrap internal estimate using VICON_FRONTPLATE");
+  parser.add(cl_cfg.vicon_init, "vi", "vicon_init", "Bootstrap internal estimate using VICON_pelvis_val");
+  parser.add(cl_cfg.pose_init, "pi", "pose_init", "Bootstrap internal estimate using POSE_BODY_ALT");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
@@ -481,7 +519,7 @@ int main(int argc, char **argv){
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
-  
+
   cl_cfg.param_file = std::string(getConfigPath()) +'/' + std::string(param_file);
   if (param_file.empty()) { // get param from lcm
     cl_cfg.param_file = "";
