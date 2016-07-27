@@ -14,7 +14,7 @@
 #include <dirent.h>
 #include <algorithm> // std::sort, std::copy
 
-#include "registeration.hpp"
+#include "registeration/registeration.hpp"
 #include <ConciseArgs>
 #include <path_util/path_util.h>
 
@@ -32,7 +32,7 @@ class RegApp{
   private:
     boost::shared_ptr<lcm::LCM> lcm_;
 
-    Reg::Ptr reg;
+    Registeration::Ptr reg;
 };
 
 struct FrameMatchResult{
@@ -47,40 +47,7 @@ typedef boost::shared_ptr<FrameMatchResult> FrameMatchResultPtr;
 
 RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, RegisterationConfig reg_cfg):          
     lcm_(lcm_){
-  reg = Reg::Ptr (new Reg (lcm_, reg_cfg));
-}
-
-void getFilenames(std::string path_to_folder, std::vector<string> &futimes, 
-    std::vector<string> &utimes_strings){
-  // Get the ordered list of file names in the directory
-  // looking for files ending 'feat'
-  std::cout << "Reading image from " << path_to_folder << "\n";
-  
-  DIR *dir;
-  struct dirent *ent;
-  if ((dir = opendir (path_to_folder.c_str() )) != NULL) {
-    /* print all the files and directories within directory */
-    while ((ent = readdir (dir)) != NULL) {
-      string fname = ent->d_name;
-      if(fname.size() > 5){
-        if (fname.compare(fname.size()-4,4,"feat") == 0){ 
-          printf ("%s\n", ent->d_name);
-          futimes.push_back( fname.substr(0,21) );
-        }
-      }
-    }
-    closedir (dir);
-  } else {
-    /* could not open directory */
-    perror ("");
-    exit(-1);
-  }
-
-  std::sort(futimes.begin(), futimes.end());
-  for (size_t i = 0; i<futimes.size(); i++){
-    utimes_strings.push_back(  futimes[i].substr(5,16) );
-  }
-
+  reg = Registeration::Ptr (new Registeration (lcm_, reg_cfg));
 }
   
 
@@ -88,7 +55,7 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
 
   std::vector<string> futimes;
   std::vector<string> utimes_strings;
-  getFilenames(path_to_folder, futimes, utimes_strings);
+  reg->getFilenames(path_to_folder, futimes, utimes_strings);
 
   
   istringstream temp_buffer( ref_filename );
