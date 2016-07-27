@@ -37,7 +37,7 @@
 using namespace std;
 
 
-Reg::Reg(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
+Registeration::Registeration(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
         lcm_(lcm_),reg_cfg_(reg_cfg_){
   std::string camera_config = "CAMERA";
   min_inliers_ = 60; // used by Hordur
@@ -152,7 +152,7 @@ void features2cloud(std::vector<ImageFeature> features, pcl::PointCloud<pcl::Poi
 
 
 
-void Reg::send_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
+void Registeration::send_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
     Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1,
     int64_t utime0, int64_t utime1           ){
 
@@ -203,7 +203,7 @@ void draw_inliers(cv::Mat &imgs, std::vector<ImageFeature> features0,    std::ve
 }
 
 
-void Reg::send_both_reg_inliers(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
+void Registeration::send_both_reg_inliers(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
     Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1,
     std::vector<int> feature_inliers0,    std::vector<int> feature_inliers1 ,
     int64_t utime0, int64_t utime1){
@@ -263,7 +263,7 @@ void compute_descriptors(cv::Mat &image, vector<ImageFeature> & features, std::s
 }
 
 
-void Reg::read_features(std::string fname,
+void Registeration::read_features(std::string fname,
     std::vector<ImageFeature>& features ){
 
   //printf( "About to read: %s - ",fname.c_str());
@@ -376,7 +376,7 @@ void pose_estimate(FrameMatchPtr match,
 
 
 
-void Reg::align_images(cv::Mat &img0, cv::Mat &img1, 
+void Registeration::align_images(cv::Mat &img0, cv::Mat &img1, 
                            std::vector<ImageFeature> &features0, std::vector<ImageFeature> &features1,
                            int64_t utime0, int64_t utime1, FrameMatchPtr &match){
 
@@ -561,5 +561,41 @@ void Reg::align_images(cv::Mat &img0, cv::Mat &img1,
 
   if (reg_cfg_.use_cv_show)
     cv::waitKey(0);  
+
+}
+
+
+
+void Registeration::getFilenames(std::string path_to_folder, std::vector<std::string> &futimes, 
+    std::vector<std::string> &utimes_strings){
+  // Get the ordered list of file names in the directory
+  // looking for files ending 'feat'
+  std::cout << "Reading files from " << path_to_folder << "\n";
+  
+  DIR *dir;
+  struct dirent *ent;
+  if ((dir = opendir (path_to_folder.c_str() )) != NULL) {
+    /* print all the files and directories within directory */
+    while ((ent = readdir (dir)) != NULL) {
+      std::string fname = ent->d_name;
+      if(fname.size() > 5){
+        if (fname.compare(fname.size()-4,4,"feat") == 0){ 
+          //printf ("%s\n", ent->d_name);
+          futimes.push_back( fname.substr(0,21) );
+        }
+      }
+    }
+    closedir (dir);
+  } else {
+    /* could not open directory */
+    perror ("");
+    exit(-1);
+  }
+
+  std::sort(futimes.begin(), futimes.end());
+  for (size_t i = 0; i<futimes.size(); i++){
+    std::cout << i << ": " << futimes[i] << "\n";
+    utimes_strings.push_back(  futimes[i].substr(5,16) );
+  }
 
 }

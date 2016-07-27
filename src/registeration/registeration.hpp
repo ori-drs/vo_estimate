@@ -51,13 +51,13 @@ struct FrameMatch{
 typedef boost::shared_ptr<FrameMatch> FrameMatchPtr;
 
 
-class Reg
+class Registeration
 {
   public:
-    typedef boost::shared_ptr<Reg> Ptr;
-    typedef boost::shared_ptr<const Reg> ConstPtr;
+    typedef boost::shared_ptr<Registeration> Ptr;
+    typedef boost::shared_ptr<const Registeration> ConstPtr;
     
-    Reg (boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_);
+    Registeration (boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_);
 
     void read_features(std::string fname,
         std::vector<ImageFeature>& features);
@@ -76,6 +76,9 @@ class Reg
         int64_t utime0, int64_t utime1);
     
     void send_lcm_image(cv::Mat &img, std::string channel );
+
+    void getFilenames(std::string path_to_folder, std::vector<std::string> &futimes, 
+        std::vector<std::string> &utimes_strings);
 
   private:
     const RegisterationConfig reg_cfg_;    
