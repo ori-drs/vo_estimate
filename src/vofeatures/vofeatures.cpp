@@ -151,9 +151,10 @@ void VoFeatures::doFeatureProcessing(bool useCurrent){
 
   
   if(!useCurrent){ // reference
-    sendFeatures(features_ref_,features_ref_indices_, "FEATURES_REF");
-    Isometry3dTime ref_camera_poseT = Isometry3dTime(utime_, ref_camera_pose_);
+    // This timestamp is incorrect. need to get and cache the correct one:
+    sendFeatures(features_ref_,features_ref_indices_, "FEATURES_REF", ref_camera_pose_, utime_);
     sendImage("REF_LEFT",left_ref_buf_, features_ref_, features_ref_indices_);
+    Isometry3dTime ref_camera_poseT = Isometry3dTime(utime_, ref_camera_pose_);
   
     // Send Features paired with the pose at the ref frame:
     pc_vis_->pose_to_lcm_from_list(3000, ref_camera_poseT);
@@ -162,9 +163,9 @@ void VoFeatures::doFeatureProcessing(bool useCurrent){
     //pc_vis_->pose_to_lcm_from_list(3002, ref_camera_poseT);
     //sendFeaturesAsCollection(features_ref_, features_ref_indices_, 3003); // blue, last 
   }else{ // current
-    sendFeatures(features_cur_,features_cur_indices_,"FEATURES_CUR");
-    Isometry3dTime cur_camera_poseT = Isometry3dTime(utime_, cur_camera_pose_);
+    sendFeatures(features_cur_,features_cur_indices_,"FEATURES_CUR", cur_camera_pose_, utime_);
     sendImage("CUR_LEFT",left_cur_buf_, features_cur_, features_cur_indices_);
+    Isometry3dTime cur_camera_poseT = Isometry3dTime(utime_, cur_camera_pose_);
 
     // Send Features paired with the pose at the ref frame:
     //pc_vis_->pose_to_lcm_from_list(3000, cur_camera_poseT);
@@ -300,10 +301,12 @@ void VoFeatures::sendFeaturesAsCollection(std::vector<ImageFeature> features,
 
 void VoFeatures::sendFeatures(std::vector<ImageFeature> features, 
                               std::vector<int> features_indices, 
-                              std::string channel){
+                              std::string channel,
+                              Eigen::Isometry3d pose,
+                              int64_t utime){
   
   reg::features_t msg;
-  msg.utime = utime_;
+  msg.utime = utime;
   for (size_t i = 0; i < features.size(); i++) {
     if (features_indices[i]){
       reg::feature_t* feat(new reg::feature_t());
@@ -329,8 +332,8 @@ void VoFeatures::sendFeatures(std::vector<ImageFeature> features,
   }
   msg.nfeatures= msg.features.size();
 
-  Eigen::Vector3d t(ref_camera_pose_.translation());
-  Eigen::Quaterniond r(ref_camera_pose_.rotation());
+  Eigen::Vector3d t(pose.translation());
+  Eigen::Quaterniond r(pose.rotation());
   msg.pos[0] = t[0];
   msg.pos[1] = t[1];
   msg.pos[2] = t[2];
@@ -339,5 +342,52 @@ void VoFeatures::sendFeatures(std::vector<ImageFeature> features,
   msg.quat[2] = r.y();
   msg.quat[3] = r.z();
   lcm_->publish(channel.c_str(), &msg);
+}
+
+
+void VoFeatures::getFeaturesFromLCM(const  reg::features_t* msg, std::vector<ImageFeature> &features, Eigen::Isometry3d &pose){
+  //std::vector<ImageFeature> features;
+    
+  for (int i =0; i < msg->nfeatures; i++){ 
+    ImageFeature f;
+    
+    f.track_id = msg->features[i].track_id;
+    f.uv[0] = msg->features[i].uv[0];
+    f.uv[1] = msg->features[i].uv[1];
+    f.base_uv[0] = msg->features[i].base_uv[0];
+    f.base_uv[1] = msg->features[i].base_uv[1];
+    f.uvd[0] = msg->features[i].uvd[0];
+    f.uvd[1] = msg->features[i].uvd[1];
+    f.uvd[2] = msg->features[i].uvd[2];
+    f.xyz[0] = msg->features[i].xyz[0];
+    f.xyz[1] = msg->features[i].xyz[1];
+    f.xyz[2] = msg->features[i].xyz[2];
+    f.xyzw[0] = msg->features[i].xyzw[0];
+    f.xyzw[1] = msg->features[i].xyzw[1];
+    f.xyzw[2] = msg->features[i].xyzw[2];
+    f.xyzw[3] = msg->features[i].xyzw[3];
+    // color left out for now
+    
+    pose.setIdentity();
+    pose.translation() << msg->pos[0], msg->pos[1], msg->pos[2];
+    Eigen::Quaterniond m(msg->quat[0],msg->quat[1],msg->quat[2],msg->quat[3]);
+    pose.rotate(m);
+    /*
+    cout << line << " is line\n";
+    cout << "i: " << i <<"\n";
+    cout << "f.track_id: " << f.track_id <<"\n";
+    cout << "f.uv: " << f.uv[0] << " "<< f.uv[1] <<"\n";
+    cout << "f.base_uv: " << f.base_uv[0] << " "<< f.base_uv[1] <<"\n";
+    cout << "f.uvd: " << f.uvd[0] << " "<< f.uvd[1]<< " "<< f.uvd[2]<<"\n";
+    cout << "f.xyz: " << f.xyz[0] << " "<< f.xyz[1]<< " "<< f.xyz[2]<<"\n";
+    cout << "f.xyzw: " << f.xyzw[0] << " "<< f.xyzw[1]<< " "<< f.xyzw[2]<< " "<< f.xyzw[3]<<"\n";
+    cout << "f.color: " << (int)f.color[0] << " "<< (int)f.color[1] << " "<< (int)f.color[2] <<"\n";
+      */
+
+    features.push_back(f);
+  }
+  
+  //cout << "in: " << msg->nfeatures << " | extracted: "<< features.size() << "\n"; 
+  return;  
 }
 
