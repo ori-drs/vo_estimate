@@ -59,20 +59,20 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
 
   
   istringstream temp_buffer( ref_filename );
-  string main_fname;
-  temp_buffer >> main_fname; 
+  string fname0;
+  temp_buffer >> fname0; 
   
-  string temp = main_fname.substr(5,16);
+  string temp = fname0.substr(5,16);
   istringstream temp_buffer2( temp);
-  int64_t main_utime;
-  temp_buffer2 >> main_utime ; 
+  int64_t utime0;
+  temp_buffer2 >> utime0 ; 
   
-  cout << main_fname << " fname\n";
-  cout << main_utime << " utime\n";
+  cout << fname0 << " fname\n";
+  cout << utime0 << " utime0\n";
   
   stringstream ifile0, featfile0;
-  ifile0 << main_fname << "_left.png";
-  featfile0 << main_fname << ".feat";
+  ifile0 << fname0 << "_left.png";
+  featfile0 << fname0 << ".feat";
   cv::Mat img0 = cv::imread( ifile0.str(), CV_LOAD_IMAGE_GRAYSCALE );
   std::vector<ImageFeature> features0;
   reg->read_features(featfile0.str(), features0);
@@ -82,11 +82,11 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
   for (size_t i= 0 ; i<  futimes.size(); i++){
     cout << "\n";
     istringstream buffer(utimes_strings[i]);
-    int64_t utime;
-    buffer >> utime; 
+    int64_t utime1;
+    buffer >> utime1; 
 
     cout << i << ": ";
-    cout << main_fname << " to "<<futimes[i] <<"\n";
+    cout << fname0 << " to "<<futimes[i] <<"\n";
     stringstream ifile1, featfile1;
     ifile1 << path_to_folder << "/" << futimes[i] << "_left.png";
     featfile1 << path_to_folder << "/" << futimes[i] << ".feat";
@@ -98,7 +98,7 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
     reg->read_features(featfile1.str(), features1);
     
     FrameMatchPtr match(new FrameMatch());
-    reg->align_images(img0, img1, features0, features1, main_utime, utime,match );
+    reg->align_images(img0, img1, features0, features1, utime0, utime1,match );
 
     if (match->status == pose_estimator::SUCCESS){
       Eigen::Quaterniond delta_quat = Eigen::Quaterniond(match->delta.rotation());
@@ -132,7 +132,7 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
   std::ofstream output_file;
 
   std::stringstream output_filename;
-  output_filename << main_fname << "_reg_output.txt";
+  output_filename << fname0 << "_reg_output.txt";
   std::cout << output_filename.str() << " is output filename\n";
   output_file.open(output_filename.str().c_str());
   output_file << "# no utime n_registeration_inliers status\n";
