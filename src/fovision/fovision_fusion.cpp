@@ -56,6 +56,7 @@ struct CommandLineConfig
   std::string in_log_fname;
   std::string param_file;
   bool draw_lcmgl;
+  bool write_feature_output;
 };
 
 std::ofstream fovision_output_file_;
@@ -202,7 +203,7 @@ void StereoOdom::featureAnalysis(){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
     features_->setCurrentCameraPose( estimator_->getCameraPose() );
-    features_->doFeatureProcessing(true); // use current features
+    features_->doFeatureProcessing(true, cl_cfg_.write_feature_output ); // use current features
   }
   
   /// Reference Feature Output: ///////////////////////////////////////////////
@@ -615,6 +616,7 @@ int main(int argc, char **argv){
   cl_cfg.param_file = ""; // full path to file
   cl_cfg.draw_lcmgl = FALSE;  
   double processing_rate = 1; // real time
+  cl_cfg.write_feature_output = FALSE;
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -633,6 +635,7 @@ int main(int argc, char **argv){
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.add(processing_rate, "pr", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
+  parser.add(cl_cfg.write_feature_output, "fo", "write_feature_output", "Write feature poses, images to file");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";

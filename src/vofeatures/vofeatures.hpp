@@ -58,7 +58,7 @@ public:
     cur_camera_pose_ = cur_camera_pose;
   }
 
-  void doFeatureProcessing(bool useCurrent);
+  void doFeatureProcessing(bool useCurrent, bool writeOutput = false);
   void sendImage(std::string channel, uint8_t *img_buf, std::vector<ImageFeature> &features,
                  std::vector<int> &feature_indices);
 

@@ -136,17 +136,19 @@ void VoFeatures::setFeatures(const fovis::FeatureMatch* matches, int num_matches
 
 // reference_or_current = 0 send reference (at the change of a key frame change)
 // reference_or_current = 1 send current (otherwise)
-void VoFeatures::doFeatureProcessing(bool useCurrent){
-  if (!useCurrent){
-  //  std::cout << "write reference features\n";
-  //  writeImage(left_ref_buf_, output_counter_, utime_);
-  //  writeFeatures(features_ref_, output_counter_, utime_);
-  //  writePose(ref_camera_pose_, output_counter_, utime_);
-  }else{
-    std::cout << "write current features\n";
-    writeImage(left_cur_buf_, output_counter_, utime_);
-    writeFeatures(features_cur_, output_counter_, utime_);
-    writePose(cur_camera_pose_, output_counter_, utime_);
+void VoFeatures::doFeatureProcessing(bool useCurrent, bool writeOutput){
+  if (writeOutput){
+    if (!useCurrent){
+    //  std::cout << "write reference features\n";
+    //  writeImage(left_ref_buf_, output_counter_, utime_);
+    //  writeFeatures(features_ref_, output_counter_, utime_);
+    //  writePose(ref_camera_pose_, output_counter_, utime_);
+    }else{
+      std::cout << "write current features\n";
+      writeImage(left_cur_buf_, output_counter_, utime_);
+      writeFeatures(features_cur_, output_counter_, utime_);
+      writePose(cur_camera_pose_, output_counter_, utime_);
+    }
   }
 
   
