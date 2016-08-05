@@ -37,6 +37,19 @@
 using namespace std;
 
 
+#include <chrono>
+auto start = std::chrono::high_resolution_clock::now();
+void tic(){
+  start = std::chrono::high_resolution_clock::now();
+}
+void toc(std::string message){
+  auto elapsed = std::chrono::high_resolution_clock::now() - start;
+  double seconds_e = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()*1E-6;
+  std::cout << seconds_e << "sec " << message << "\n"; 
+}
+
+
+
 Registeration::Registeration(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
         lcm_(lcm_),reg_cfg_(reg_cfg_){
   std::string camera_config = "CAMERA";
@@ -394,12 +407,14 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
   }
 
     /// 2. Extract Image Descriptors:
+  //tic();
   std::vector<cv::KeyPoint> keypoints0, keypoints1;
   cv::Mat descriptors0, descriptors1;
   cv::BriefDescriptorExtractor extractor(32); // size of descriptor in bytes
   std::string desc_name= "brief";
   compute_descriptors(img0, features0, desc_name, extractor,descriptors0,keypoints0);
   compute_descriptors(img1, features1, desc_name, extractor,descriptors1,keypoints1);
+  //toc("compute_descriptors");
 
   if (reg_cfg_.verbose){
     cout << descriptors0.rows << " descripters in 0 | "
@@ -407,7 +422,9 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
   }
 
 
+
   /// 3: Matching descriptor vectors with a brute force matcher
+  //tic();
   cv::BFMatcher matcher(cv::NORM_HAMMING); // used by hordur
   std::vector< cv::DMatch > matches0in1,matches1in0;
   matcher.match(descriptors0, descriptors1, matches0in1); // each feature in 0 found in 1
@@ -415,8 +432,10 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
   BOOST_FOREACH (cv::DMatch& match, matches1in0) {
     std::swap(match.trainIdx, match.queryIdx);
   }
+  //toc("match descriptors");
 
   /// 3b keep intersection, aka the mutual best matches.
+  //tic();
   std::sort(matches0in1.begin(), matches0in1.end(), DMatch_lt);
   std::sort(matches1in0.begin(), matches1in0.end(), DMatch_lt);
   std::vector<cv::DMatch> matches;
@@ -431,18 +450,20 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
   }
 
   /// 3c Draw descriptor matches
-  cv::Mat img_matches0in1, img_matches1in0;
-  cv::drawMatches( img0, keypoints0, img1, keypoints1, matches0in1, img_matches0in1 );
-  //imshow("Matches0in1", img_matches0in1 );
-  //cv::waitKey(0);  
-
-  cv::drawMatches( img0, keypoints0, img1, keypoints1, matches1in0, img_matches1in0  );
-  //imshow("Matches1in0 [matches1in0 reordered]", img_matches1in0 );
-  //cv::waitKey(0);  
-
   cv::Mat img_matches_inter;
-  cv::drawMatches( img0, keypoints0, img1, keypoints1, matches, img_matches_inter );
-  //imshow("Matches Intersection", img_matches_inter );
+  if (reg_cfg_.publish_diagnostics || reg_cfg_.use_cv_show){
+    cv::Mat img_matches0in1, img_matches1in0;
+    cv::drawMatches( img0, keypoints0, img1, keypoints1, matches0in1, img_matches0in1 );
+    //imshow("Matches0in1", img_matches0in1 );
+    //cv::waitKey(0);  
+
+    cv::drawMatches( img0, keypoints0, img1, keypoints1, matches1in0, img_matches1in0  );
+    //imshow("Matches1in0 [matches1in0 reordered]", img_matches1in0 );
+    //cv::waitKey(0); 
+ 
+    cv::drawMatches( img0, keypoints0, img1, keypoints1, matches, img_matches_inter );
+    //imshow("Matches Intersection", img_matches_inter );
+  }
   
   /// 4 Pair up Matches: (TODO: understand this better)
   std::vector<int> idxA;
@@ -483,7 +504,9 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
     //dmatch.queryIdx = idxA[dmatch.queryIdx];
     //dmatch.trainIdx = idxB[dmatch.trainIdx];
   }
+  //toc("sort descriptors");
 
+  //tic();
   // 5 find the motion transform between to images
   if (matches.size() >= 3) {
 
@@ -534,33 +557,33 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
       << match->n_registeration_inliers << "\n";
   }
 
-  if (match->status == pose_estimator::SUCCESS){
-    // Draw the inlier set:
-    draw_inliers(img_matches_inter,features0, features1,match->featuresA_indices, match->featuresB_indices);
+  if (reg_cfg_.publish_diagnostics || reg_cfg_.use_cv_show){
+    if (match->status == pose_estimator::SUCCESS){
+      // Draw the inlier set:
+      draw_inliers(img_matches_inter,features0, features1,match->featuresA_indices, match->featuresB_indices);
 
-    if (reg_cfg_.publish_diagnostics){
-      Eigen::Isometry3d nullpose;
-      nullpose.setIdentity();
+      if (reg_cfg_.publish_diagnostics){
+        Eigen::Isometry3d nullpose;
+        nullpose.setIdentity();
 
-      // all the features:
-      if (reg_cfg_.publish_diagnostics)
-        send_both_reg(features0, features1,match->delta,nullpose, utime0, utime1);
-    
-      // just the inliers:
-      send_both_reg_inliers(features0, features1,nullpose,match->delta, 
-                      match->featuresA_indices, match->featuresB_indices,
-                      utime0, utime1);
+        // all the features:
+        if (reg_cfg_.publish_diagnostics)
+          send_both_reg(features0, features1,match->delta,nullpose, utime0, utime1);
+      
+        // just the inliers:
+        send_both_reg_inliers(features0, features1,nullpose,match->delta, 
+                        match->featuresA_indices, match->featuresB_indices,
+                        utime0, utime1);
 
-      imgutils_->sendImageJpeg(img_matches_inter.data, 0, img_matches_inter.cols, img_matches_inter.rows, 94, "REGISTERATION", 3);
+        imgutils_->sendImageJpeg(img_matches_inter.data, 0, img_matches_inter.cols, img_matches_inter.rows, 94, "REGISTERATION", 3);
+      }
+    }
+    if (reg_cfg_.use_cv_show){
+      imshow("Matches Inliers", img_matches_inter);
+      cv::waitKey(0);  
     }
   }
-
-
-  if (reg_cfg_.use_cv_show)
-    imshow("Matches Inliers", img_matches_inter);
-
-  if (reg_cfg_.use_cv_show)
-    cv::waitKey(0);  
+  //toc("align_images, rest");
 
 }
 
