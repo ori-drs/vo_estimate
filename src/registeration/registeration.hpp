@@ -9,7 +9,6 @@
 
 #include <estimate-pose/pose_estimator.hpp>
 
-#include <pronto_utils/pronto_lcm.hpp>
 #include <pronto_utils/pronto_vis.hpp>
 
 #include <bot_param/param_client.h>

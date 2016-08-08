@@ -57,10 +57,10 @@ Registeration::Registeration(boost::shared_ptr<lcm::LCM> &lcm_, const Registerat
 
   // Set up frames and config:
   if (reg_cfg_.param_file.empty()) {
-    std::cout << "Get param from LCM\n";
+    std::cout << "Get params from LCM\n";
     botparam_ = bot_param_get_global(lcm_->getUnderlyingLCM(), 0);
   } else {
-    std::cout << "Get param from file\n";
+    std::cout << "Get params from file\n";
     botparam_ = bot_param_new_from_file(reg_cfg_.param_file.c_str());
   }
   if (botparam_ == NULL) {
@@ -589,10 +589,11 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
 
 
 
+// Get the ordered list of file names in the directory
+// looking for files ending 'feat'
+// TODO: should this be moved to image_database.cpp?
 void Registeration::getFilenames(std::string path_to_folder, std::vector<std::string> &futimes, 
     std::vector<std::string> &utimes_strings){
-  // Get the ordered list of file names in the directory
-  // looking for files ending 'feat'
   std::cout << "Reading files from " << path_to_folder << "\n";
   
   DIR *dir;
@@ -617,8 +618,9 @@ void Registeration::getFilenames(std::string path_to_folder, std::vector<std::st
 
   std::sort(futimes.begin(), futimes.end());
   for (size_t i = 0; i<futimes.size(); i++){
-    std::cout << i << ": " << futimes[i] << "\n";
+    //std::cout << i << ": " << futimes[i] << "\n";
     utimes_strings.push_back(  futimes[i].substr(5,16) );
   }
+  std::cout << "Found " << futimes.size() << " feature and image files\n";
 
 }
