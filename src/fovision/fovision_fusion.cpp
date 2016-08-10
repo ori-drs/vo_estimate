@@ -203,7 +203,10 @@ void StereoOdom::featureAnalysis(){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
     features_->setCurrentCameraPose( estimator_->getCameraPose() );
-    features_->doFeatureProcessing(true, cl_cfg_.write_feature_output ); // use current features
+    if (vo_->getNumMatches()>0)
+      features_->doFeatureProcessing(true, cl_cfg_.write_feature_output ); // use current features
+    else
+      std::cout << "no matches, will not publish or output\n"; // this happens for first frame
   }
   
   /// Reference Feature Output: ///////////////////////////////////////////////
