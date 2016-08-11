@@ -53,7 +53,6 @@ void toc(std::string message){
 Registeration::Registeration(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
         lcm_(lcm_),reg_cfg_(reg_cfg_){
   std::string camera_config = "CAMERA";
-  min_inliers_ = 60; // used by Hordur
 
   // Set up frames and config:
   if (reg_cfg_.param_file.empty()) {

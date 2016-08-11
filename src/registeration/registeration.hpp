@@ -95,7 +95,6 @@ class Registeration
 
     image_io_utils*  imgutils_;
 
-    int min_inliers_;
     Eigen::Matrix<double, 3, 4> projection_matrix_;
 
 };
