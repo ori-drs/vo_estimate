@@ -1,6 +1,8 @@
 // Filter Chain to process Georges Square Husky Dataset (from 2016 06 07)
 // and to optimize the results with iSAM
 //
+// Filter Chain 1 - From LCM input ===========================================
+//
 // 1. Generate a Motion Trajectory using Visual Odometry (with IMU to constrain gravity drift):
 // se-simple-fusion -P husky/robot.cfg  -m 3   -p POSE_BODY_ON_IMU -L ~/logs/husky/2016-06-07-outdoor-experiment-with-MS-and-sick/lcmlog-2016-06-07.00-camera-10fps-three-loops-only -pr 0  
 // ... interested in the pose of the camera at each iteration at 10Hz (not the 100Hz IMU version)
@@ -19,6 +21,17 @@
 // The following works well for a very large 12,000 trajectory
 // isam -L husky_isam_trajectory.txt  -d 100 -u 100 -W output.txt
 // (the result is published to LCM collections)
+//
+//
+// Filter Chain 2 - From text input ===========================================  
+// 
+// 1. Use vo (as above) to write an pose_trajectory.txt of this format:
+// utime x y z qw qx qy qz roll pitch yaw
+//
+// 2. Read the text file using the mode implemented below (but commented out)
+// This will output the same files as #2 above
+// 
+// 3. Use iSAM as in #3 above
 
 #include <string>
 #include <iostream>
@@ -61,9 +74,16 @@ class App{
 
     void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
 
+    void loadPoseTrajectory(std::string database_path, std::string fname);
+    void convertPoseToIsam(Isometry3dTime currentPoseT);
+
+    pronto_vis* pc_vis_;
+
     Isometry3dTime previousPoseT_;
 
     int isam_counter_;
+
+    std::vector<Isometry3dTime> pose_trajectory_;
 };    
 
 App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
@@ -77,19 +97,87 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
   world_trajectory.open("husky_world_trajectory.txt");//, ios::out | ios::app | ios::binary);
   isam_counter_ = 0;
   cout <<"Constructed\n";
+
+
+  // Mode for Filter Chain 2 mode
+  /*
+  pc_vis_ = new pronto_vis( lcm_pub_->getUnderlyingLCM() ); // 4 triangle, 5 triad
+  pc_vis_->obj_cfg_list.push_back( obj_cfg(4004,"Pose Trajectory",5,1) );
+  std::string database_path = "/home/mfallon/logs/husky/2016-07-georges-square-west/";
+  std::string fname = "husky_trajectory_2_experiment.txt";
+  loadPoseTrajectory(database_path, fname);
+  pc_vis_->pose_collection_to_lcm_from_list(4004, pose_trajectory_);
+  for (size_t i = 0; i < pose_trajectory_.size() ; i++){
+     convertPoseToIsam(pose_trajectory_[i] );
+  }
+  cout <<"Finished converting to iSAM format\n";
+  exit(-1);
+  */
 }
 
 
 
+void App::loadPoseTrajectory(std::string database_path, std::string fname){
+
+  string full_filename =  database_path + fname;
+  //printf( "About to read: %s - ",full_filename.c_str());
+  string line0;
+  std::ifstream this_file (full_filename.c_str());
+  if (this_file.is_open()){
+
+    getline (this_file,line0);
+    //cout << line0 << " is first line\n";
+
+    while ( this_file.good() ){
+      string line;
+      getline (this_file,line);
+      if (line.size() > 4){
+
+        int64_t utime;
+
+        double p[3], q[4], r[3];
+        sscanf(line.c_str(), "%ld %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",&utime,
+            &(p[0]), &(p[1]), &(p[2]), // position
+            &(q[0]), &(q[1]), &(q[2]),  &(q[3]), // quat wxyz
+            &(r[0]), &(r[1]), &(r[2])); // rpy (unused)
+
+        Eigen::Isometry3d pose;
+        pose.setIdentity();
+        pose.translation() << p[0],p[1],p[2];
+        Eigen::Quaterniond quat(q[0],q[1],q[2],q[3]);
+        pose.rotate(quat);
+        Isometry3dTime poseT = Isometry3dTime(utime, pose);
+
+        //cout << utime << " | ";
+        //cout << "p: " << p[0] << " " << p[1] << " " << p[2] << " | ";
+        //cout << "q: " << q[0] << " " << q[1] << " " << q[2] << " " << q[3] << " | ";
+        //cout << "r: " << r[0] << " " << r[1] << " " << r[2] << "\n";
+
+        pose_trajectory_.push_back(poseT);
+      }
+    }
+    this_file.close();
+  } else{
+    printf( "Unable to open trajectory file\n%s",fname.c_str());
+    exit(-1);
+    return;
+  }
+  cout << "Loaded pose trajectory of length " << pose_trajectory_.size() << "\n";
+}
+
+
+
+void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
+     const std::string& channel, const  bot_core::pose_t* msg){
+  Isometry3dTime currentPoseT = pronto::getPoseAsIsometry3dTime(msg);
+  convertPoseToIsam(currentPoseT);
+}
 
 // 0 will skip first 10 frames and print the 10th
 // 1 will print the first frame
 int counter =0; 
-
-void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
-     const std::string& channel, const  bot_core::pose_t* msg){
+void App::convertPoseToIsam(Isometry3dTime currentPoseT){
   counter++;
-  Isometry3dTime currentPoseT = pronto::getPoseAsIsometry3dTime(msg);
 
   if (previousPoseT_.utime == 0){
     std::cout << "initializing pose\n";
@@ -107,7 +195,7 @@ void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
   Isometry3dTime deltaPoseT = Isometry3dTime(currentPoseT.utime, deltaPose);
   //bot_core::pose_t msg_out = pronto::getIsometry3dAsBotPose(deltaPoseT.pose, deltaPoseT.utime);
   //lcm_->publish(std::string("POSE_BODY_DELTA"),&msg_out);
-  std::cout << msg->utime << " " << deltaPoseT.pose.translation().transpose() << "\n";
+  std::cout << currentPoseT.utime << " " << deltaPoseT.pose.translation().transpose() << "\n";
 
 
   // 2. Output the iSAM constraints (in either 2D or 3D) and a trajectory 
@@ -124,7 +212,7 @@ void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
 
   double current_rpy[3];
   quat_to_euler( Eigen::Quaterniond( currentPoseT.pose.rotation() ) , current_rpy[0], current_rpy[1], current_rpy[2]);
-  world_trajectory << msg->utime  << " " << (isam_counter_) << " "
+  world_trajectory << currentPoseT.utime  << " " << (isam_counter_) << " "
                   << currentPoseT.pose.translation().x() << " " << currentPoseT.pose.translation().y() << " "
                   << current_rpy[2] << "\n";
   world_trajectory.flush();
@@ -143,7 +231,7 @@ void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
   double current_rpy[3];
   Eigen::Quaterniond current_quat = Eigen::Quaterniond( currentPoseT.pose.rotation() );
   quat_to_euler( current_quat  , current_rpy[0], current_rpy[1], current_rpy[2]);
-  world_trajectory << msg->utime  << " " << (isam_counter_) << " "
+  world_trajectory << currentPoseT.utime  << " " << (isam_counter_) << " "
                   << currentPoseT.pose.translation().x() << " " << currentPoseT.pose.translation().y() << " " << currentPoseT.pose.translation().z() << " "
                   << current_quat.w() << " " << current_quat.x() << " " << current_quat.y() << " " << current_quat.z() << " "
                   << current_rpy[0] << " " << current_rpy[1] << " " << current_rpy[2] << "\n";
