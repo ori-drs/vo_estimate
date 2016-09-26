@@ -57,6 +57,7 @@ struct CommandLineConfig
   std::string param_file;
   bool draw_lcmgl;
   bool write_feature_output;
+  int which_vo_options;
 };
 
 std::ofstream fovision_output_file_;
@@ -167,7 +168,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   decompress_disparity_buf_ = (uint8_t*) malloc( 4*image_size_*sizeof(uint8_t));  // arbitary size chosen..
   imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
 
-  vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl);
+  vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, cl_cfg_.which_vo_options);
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
   estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension );
 
@@ -620,6 +621,7 @@ int main(int argc, char **argv){
   cl_cfg.draw_lcmgl = FALSE;  
   double processing_rate = 1; // real time
   cl_cfg.write_feature_output = FALSE;
+  cl_cfg.which_vo_options = 1;
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -639,6 +641,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.add(processing_rate, "pr", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
   parser.add(cl_cfg.write_feature_output, "fo", "write_feature_output", "Write feature poses, images to file");
+  parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";

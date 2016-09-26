@@ -4,33 +4,23 @@
 using namespace std;
 
 FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
-  boost::shared_ptr<fovis::StereoCalibration> kcal, bool draw_lcmgl_):
-  lcm_(lcm_), kcal_(kcal), draw_lcmgl_(draw_lcmgl_),
-  odom_(kcal_->getLeftRectification(),  
-  FoVision::getDefaultOptions()),
+  boost::shared_ptr<fovis::StereoCalibration> kcal, bool draw_lcmgl_,
+  int which_vo_options_):
+  lcm_(lcm_), kcal_(kcal), draw_lcmgl_(draw_lcmgl_), which_vo_options_(which_vo_options_),
+  odom_(kcal_->getLeftRectification(), FoVision::getOptions() ),
   pose_(Eigen::Isometry3d::Identity())
 {
-//  fovis::CameraIntrinsicsParameters rgb_params = kcal_->getParameters().rgb_params;
-//  depth_image_ = new fovis::DepthImage(rgb_params, rgb_params.width, rgb_params.height);
-//  depth_data_ = new float[rgb_params.width * rgb_params.height];
 
-  fovis::VisualOdometryOptions vo_opts = getDefaultOptions();  
+  fovis::VisualOdometryOptions vo_opts = getOptions();
   // typical left/right stereo
   stereo_depth_ = new fovis::StereoDepth(kcal_.get(), vo_opts);
   // left/disparity from multisense
-  stereo_disparity_= new fovis::StereoDisparity( kcal_.get()) ;// vo_opts); vo_opts no longer required
+  stereo_disparity_= new fovis::StereoDisparity( kcal_.get());
   
- // converted_depth_data_= new float[rgb_params.width * rgb_params.height];  
-
-
-  //#ifdef USE_LCMGL
-    // use bot_param_lcm because it doesn't come from logfile
   if (draw_lcmgl_){
     bot_lcmgl_t* lcmgl = bot_lcmgl_init(lcm_->getUnderlyingLCM(), "stereo-odometry");
     visualization_ = new Visualization(lcmgl, kcal.get());
   }
-  //#endif
-
 }
 
 
@@ -50,9 +40,7 @@ void FoVision::doOdometry(uint8_t *left_buf,uint8_t *right_buf, int64_t utime){
   odom_.processFrame(left_buf, stereo_depth_);
   const fovis::MotionEstimator * me = odom_.getMotionEstimator();
 
-  //#ifdef USE_LCMGL
   if(draw_lcmgl_) { visualization_->draw(&odom_); }
-  //#endif  
 
 }
 
@@ -65,10 +53,8 @@ void FoVision::doOdometry(uint8_t *left_buf,float *disparity_buf, int64_t utime)
   odom_.processFrame(left_buf, stereo_disparity_);
   const fovis::MotionEstimator * me = odom_.getMotionEstimator();
 
-
-  //#ifdef USE_LCMGL
   if(draw_lcmgl_) { visualization_->draw(&odom_); }
-  //#endif  
+
 }
 
 void FoVision::send_status_msg(std::string text){
@@ -216,93 +202,32 @@ void FoVision::fovis_stats(){
 }
 
 
-fovis::StereoCalibration* FoVision::default_config(){
-  // make up an initial calibration
-  // This is calibration information for a specific Kinect
-  fovis::StereoCalibrationParameters kparams;
+fovis::VisualOdometryOptions FoVision::getOptions()
+{
+  fovis::VisualOdometryOptions vo_opts = fovis::VisualOdometry::getDefaultOptions();
+  std::cout << which_vo_options_ << " which_options\n";
 
-  fovis::CameraIntrinsicsParameters lparams;
-  lparams.width = 800;
-  lparams.height= 800;
-  lparams.fx = 476.7014;
-  lparams.fy = 476.7014;
-  lparams.cx = 400.5; // should this have another 0.5?
-  lparams.cy = 400.5; // should this have another 0.5?
-  lparams.k1 = 0.0;
-  lparams.k2 = 0.0;
-  lparams.k3 = 0.0;
-  lparams.p1 = 0.0;
-  lparams.p2 = 0.0;
+  if(which_vo_options_ == 0){
+    // not commonly used. legacy options
+    getOptionsHordur(vo_opts);
+  }else if (which_vo_options_ == 1){
+    // setting very commonly used
+    getOptionsCommon(vo_opts);
+  }else if (which_vo_options_ == 2){
+    // modify some of the common parameters to run at framerate
+    getOptionsCommon(vo_opts);
+    getOptionsFaster(vo_opts);
+  }else{
+    std::cout << "Choose a valid set of VO options e.g. 1 for default options\n";
+    exit(-1);
+  }
 
-  fovis::CameraIntrinsicsParameters rparams;
-  rparams.width = 800;
-  rparams.height = 800;
-  rparams.fx = 476.7014;
-  rparams.fy = 476.7014;
-  rparams.cx = 400.5; // should this have another 0.5?
-  rparams.cy = 400.5; // should this have another 0.5?
-  rparams.k1 = 0.0;
-  rparams.k2 = 0.0;
-  rparams.k3 = 0.0;
-  rparams.p1 = 0.0;
-  rparams.p2 = 0.0;
-
-  kparams.left_parameters = lparams;
-  kparams.right_parameters = rparams;
-
-  kparams.right_to_left_translation[0] = -0.07;
-  kparams.right_to_left_translation[1] =  0.0;
-  kparams.right_to_left_translation[2] =  0.0;
-  kparams.right_to_left_rotation[0] = 1.0;
-  kparams.right_to_left_rotation[1] = 0.0;
-  kparams.right_to_left_rotation[2] = 0.0;
-  kparams.right_to_left_rotation[3] = 0.0;
-
-/*
-  kparams.width = 640;
-  kparams.height = 480;
-
-  kparams.depth_params.width = kparams.width;
-  kparams.depth_params.height = kparams.height;
-  kparams.depth_params.fx = 576.09757860;
-  kparams.depth_params.fy = kparams.depth_params.fx;
-  kparams.depth_params.cx = 321.06398107;
-  kparams.depth_params.cy = 242.97676897;
-
-  kparams.rgb_params.width = kparams.width;
-  kparams.rgb_params.height = kparams.height;
-  kparams.rgb_params.fx = 576.09757860;
-  kparams.rgb_params.fy = kparams.rgb_params.fx;
-  kparams.rgb_params.cx = 321.06398107;
-  kparams.rgb_params.cy = 242.97676897;
-
-  kparams.shift_offset = 1079.4753;
-  kparams.projector_depth_baseline = 0.07214;
-
-  Eigen::Matrix3d R;
-  R << 0.999999, -0.000796, 0.001256, 0.000739, 0.998970, 0.045368, -0.001291, -0.045367, 0.998970;
-  kparams.depth_to_rgb_translation[0] = -0.015756;
-  kparams.depth_to_rgb_translation[1] = -0.000923;
-  kparams.depth_to_rgb_translation[2] =  0.002316;
-  Eigen::Quaterniond Q(R);
-  kparams.depth_to_rgb_quaternion[0] = Q.w();
-  kparams.depth_to_rgb_quaternion[1] = Q.x();
-  kparams.depth_to_rgb_quaternion[2] = Q.y();
-  kparams.depth_to_rgb_quaternion[3] = Q.z();
-*/
-
-  return new fovis::StereoCalibration(kparams);
+  return vo_opts;
 }
 
 
-
-
-fovis::VisualOdometryOptions FoVision::getDefaultOptions()
+void FoVision::getOptionsHordur(fovis::VisualOdometryOptions &vo_opts)
 {
-  fovis::VisualOdometryOptions vo_opts = fovis::VisualOdometry::getDefaultOptions();
-
-  bool use_hordur_setting =false;
-  if(use_hordur_setting){
   // change to stereo 'defaults'
   vo_opts["use-adaptive-threshold"] = "false"; // hordur: use now not very useful - adds noisy features
   vo_opts["fast-threshold"] = "15";
@@ -343,8 +268,11 @@ fovis::VisualOdometryOptions FoVision::getDefaultOptions()
   vo_opts["stereo-max-dist-epipolar-line"] = "2.0";
   vo_opts["stereo-max-refinement-displacement"] = "2.0";
   vo_opts["stereo-max-disparity"] = "128";
+}
 
-  }else{
+
+void FoVision::getOptionsCommon(fovis::VisualOdometryOptions &vo_opts)
+{
 // Original:
 
   // change to stereo 'defaults'
@@ -387,7 +315,16 @@ fovis::VisualOdometryOptions FoVision::getDefaultOptions()
   vo_opts["stereo-max-dist-epipolar-line"] = "2.0";
   vo_opts["stereo-max-refinement-displacement"] = "2.0";
   vo_opts["stereo-max-disparity"] = "128";
-  }
+}
 
-  return vo_opts;
+
+void FoVision::getOptionsFaster(fovis::VisualOdometryOptions &vo_opts)
+{
+  // Modifications to specific VO parameters to achieve framerate
+  // TODO: more fully evaluate the performance effect of this
+
+  vo_opts["target-pixels-per-feature"] = "500";
+
+  vo_opts["bucket-width"] = "100";
+  vo_opts["bucket-height"] = "100";
 }

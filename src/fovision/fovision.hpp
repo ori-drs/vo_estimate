@@ -28,12 +28,13 @@ class FoVision
 public:
     FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
              boost::shared_ptr<fovis::StereoCalibration> kcal,
-             bool draw_lcmgl_);
+             bool draw_lcmgl_, int which_vo_options_);
     
     
     ~FoVision();
 
     bool draw_lcmgl_;
+    int which_vo_options_;
     
     
     void doOdometry(uint8_t *left_buf,uint8_t *right_buf, int64_t utime);
@@ -111,8 +112,14 @@ private:
     
     float* depth_data_;
     Eigen::Isometry3d pose_;
-    fovis::StereoCalibration* default_config();
-    static fovis::VisualOdometryOptions getDefaultOptions();
+
+    fovis::VisualOdometryOptions getOptions();
+
+    void getOptionsHordur(fovis::VisualOdometryOptions &vo_opts);
+    void getOptionsCommon(fovis::VisualOdometryOptions &vo_opts);
+    void getOptionsFaster(fovis::VisualOdometryOptions &vo_opts);
+
+
     int64_t current_timestamp_,prev_timestamp_;
 
     Visualization* visualization_;    
