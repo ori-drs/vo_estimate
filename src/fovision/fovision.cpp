@@ -273,7 +273,8 @@ void FoVision::getOptionsHordur(fovis::VisualOdometryOptions &vo_opts)
 
 void FoVision::getOptionsCommon(fovis::VisualOdometryOptions &vo_opts)
 {
-// Original:
+  // Commonly used settings for some time
+  // 9.53fps on 0490-0515.lcmlog (from 2016-06-07 George Square log)
 
   // change to stereo 'defaults'
   vo_opts["use-adaptive-threshold"] = "true"; // hordur: use now not very useful - adds noisy features
@@ -322,9 +323,10 @@ void FoVision::getOptionsFaster(fovis::VisualOdometryOptions &vo_opts)
 {
   // Modifications to specific VO parameters to achieve framerate
   // TODO: more fully evaluate the performance effect of this
+  // 18.95fps on 0490-0515.lcmlog (from 2016-06-07 George Square log)
 
-  vo_opts["target-pixels-per-feature"] = "500";
+  vo_opts["target-pixels-per-feature"] = "400";
 
-  vo_opts["bucket-width"] = "100";
-  vo_opts["bucket-height"] = "100";
+  vo_opts["bucket-width"] = "80";
+  vo_opts["bucket-height"] = "80";
 }
