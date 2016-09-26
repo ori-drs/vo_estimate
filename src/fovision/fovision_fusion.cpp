@@ -25,12 +25,6 @@
 #include <image_io_utils/image_io_utils.hpp> // to simplify jpeg/zlib compression and decompression
 #include <ConciseArgs>
 
-/// For Forward Kinematics from body to head:
-#include "urdf/model.h"
-#include "kdl/tree.hpp"
-#include "kdl_parser/kdl_parser.hpp"
-#include "forward_kinematics/treefksolverposfull_recursive.hpp"
-#include <model-client/model-client.hpp>
 #include <path_util/path_util.h>
 
 #include <opencv/cv.h> // for disparity 
@@ -106,10 +100,6 @@ class StereoOdom{
     void multisenseLDHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void multisenseLRHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
 
-    // Kinematics
-    boost::shared_ptr<ModelClient> model_;
-    boost::shared_ptr<KDL::TreeFkSolverPosFull_recursive> fksolver_;
-
     // IMU
     bool pose_initialized_; // initalized from VO
     int imu_counter_;
@@ -143,17 +133,6 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   }
   botframes_= bot_frames_get_global(lcm_recv_->getUnderlyingLCM(), botparam_);
   botframes_cpp_ = new bot::frames(botframes_);
-
-  /*
-  model_ = boost::shared_ptr<ModelClient>(new ModelClient(lcm_recv_->getUnderlyingLCM(), 0));
-  KDL::Tree tree;
-  if (!kdl_parser::treeFromString( model_->getURDFString() ,tree)){
-    cerr << "ERROR: Failed to extract kdl tree from xml robot description" << endl;
-    exit(-1);
-  }
-  fksolver_ = boost::shared_ptr<KDL::TreeFkSolverPosFull_recursive>(new KDL::TreeFkSolverPosFull_recursive(tree));
-  //last_atlas_state_msg_.utime = 0;
-  */
 
   config_ = new voconfig::KmclConfiguration(botparam_, cl_cfg_.camera_config);
   boost::shared_ptr<fovis::StereoCalibration> stereo_calibration_;
@@ -555,18 +534,6 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
     imu_counter_++;
   }
 }
-
-
-Eigen::Isometry3d KDLToEigen(KDL::Frame tf){
-  Eigen::Isometry3d tf_out;
-  tf_out.setIdentity();
-  tf_out.translation()  << tf.p[0], tf.p[1], tf.p[2];
-  Eigen::Quaterniond q;
-  tf.M.GetQuaternion( q.x() , q.y(), q.z(), q.w());
-  tf_out.rotate(q);
-  return tf_out;
-}
-
 
 
 int temp_counter = 0;

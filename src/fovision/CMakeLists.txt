@@ -23,12 +23,7 @@ pods_install_pkg_config_file(fovision
     LIBS -lfovision
     REQUIRES 
     VERSION 0.0.1)
-
-    
-# Required for FK only:
-set(FK_PACKAGES urdf orocos-kdl kdl-parser forward-kinematics model-client)
-
-    
+  
 
 ##############################################
 add_executable (se-simple-fusion fovision_fusion.cpp)
@@ -39,8 +34,7 @@ pods_use_pkg_config_packages(se-simple-fusion eigen3
   voconfig   vofeatures   voestimator   fovision
   pronto_vis  
   opencv image_io_utils
-  path-util
-  ${FK_PACKAGES})
+  path-util)
 pods_install_executables(se-simple-fusion)
 
 
@@ -53,6 +47,5 @@ pods_use_pkg_config_packages(se-simple-vo eigen3
   voconfig   vofeatures   voestimator   fovision
   pronto_vis  
   opencv image_io_utils
-  path-util
-  ${FK_PACKAGES})
+  path-util)
 pods_install_executables(se-simple-vo)

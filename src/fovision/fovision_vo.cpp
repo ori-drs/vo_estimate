@@ -22,12 +22,6 @@
 #include <pronto_utils/pronto_vis.hpp> // visualize pt clds
 #include <ConciseArgs>
 
-/// For Forward Kinematics from body to head:
-#include "urdf/model.h"
-#include "kdl/tree.hpp"
-#include "kdl_parser/kdl_parser.hpp"
-#include "forward_kinematics/treefksolverposfull_recursive.hpp"
-#include <model-client/model-client.hpp>
 #include <path_util/path_util.h>
 #include <image_io_utils/image_io_utils.hpp> // to simplify jpeg/zlib compression and decompression
 
@@ -164,7 +158,6 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     std::cout << "Init internal est using default pose\n";
 
     // Useful for Atlas logs: initialise with nominal camera frame with the head pointing horizontally
-    /*
     Eigen::Matrix3d M;
     M <<  0,  0, 1,
         -1,  0, 0,
@@ -173,10 +166,9 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     world_to_camera_.translation().x() = 0;
     world_to_camera_.translation().y() = 0;
     world_to_camera_.translation().z() = 1.65; // nominal head height
-    */
 
     // Useful for Valkyrie logs: initialise with camera frame upside down but horizontal
-    Eigen::Matrix3d M;
+    /*Eigen::Matrix3d M;
     M <<  0,  0, 1,
         1,  0, 0,
           0, 1, 0;
@@ -184,6 +176,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     world_to_camera_.translation().x() = 0;
     world_to_camera_.translation().y() = 0;
     world_to_camera_.translation().z() = 1.65; // nominal head height
+    */
 
     pose_initialized_ = true;
   }
