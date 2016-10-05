@@ -608,7 +608,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.add(processing_rate, "pr", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
   parser.add(cl_cfg.write_feature_output, "fo", "write_feature_output", "Write feature poses, images to file");
-  parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use");
+  parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use [1=slow,2=fast]");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
