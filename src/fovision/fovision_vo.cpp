@@ -427,6 +427,7 @@ void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int6
                                       "CAMERA_LEFT" , "body", &timestamp);    
   if (timestamp==0){
     std::cout << "CAMERA_LEFT to body not updated, not initialising yet\n";
+    std::cout << "TODO: fix this issue for sensor with an actuated neck e.g. HyQ\n";
     return;
   }
 
