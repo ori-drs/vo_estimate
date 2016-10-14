@@ -47,6 +47,7 @@ struct CommandLineConfig
   std::string param_file;
   bool draw_lcmgl;
   int which_vo_options;
+  bool check_valid_camera_frame;
 };
 
 class StereoOdom{
@@ -421,20 +422,22 @@ static inline bot_core::pose_t getPoseAsBotPose(Eigen::Isometry3d pose, int64_t 
 
 void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime){
 
-  // Because body to CAMERA comes through FK, need to get an updated frame (BODY_TO_HEAD)
-  int64_t timestamp;
-  int status  = bot_frames_get_latest_timestamp(botframes_, 
-                                      "CAMERA_LEFT" , "body", &timestamp);    
-  if (timestamp==0){
-    std::cout << "CAMERA_LEFT to body not updated, not initialising yet\n";
-    std::cout << "TODO: fix this issue for sensor with an actuated neck e.g. HyQ\n";
-    return;
+  if (cl_cfg_.check_valid_camera_frame){
+    // Because body to CAMERA comes through FK, need to get an updated frame (BODY_TO_HEAD)
+    int64_t timestamp;
+    int status  = bot_frames_get_latest_timestamp(botframes_, 
+                                        "CAMERA_LEFT" , "body", &timestamp);    
+    if (timestamp==0){
+      std::cout << "CAMERA_LEFT to body not updated, not initialising yet\n";
+      std::cout << "This check if for articulated joints between head and body\n";
+      return;
+    }
   }
 
   Eigen::Isometry3d body_to_camera = botframes_cpp_->get_trans_with_utime(botframes_, "CAMERA_LEFT" , "body", utime);
   world_to_camera_ = world_to_body_init * body_to_camera;
 
-  std::cout << "Init internal est using Vicon\n";
+  std::cout << "Init state est using message\n";
   pose_initialized_ = TRUE;    
 
 }
@@ -497,6 +500,7 @@ int main(int argc, char **argv){
   cl_cfg.feature_analysis_publish_period = 1; // 5
   cl_cfg.draw_lcmgl = FALSE;
   cl_cfg.which_vo_options = 1;
+  cl_cfg.check_valid_camera_frame = TRUE;
 
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
@@ -514,6 +518,7 @@ int main(int argc, char **argv){
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use [1=slow,2=fast]");
+  parser.add(cl_cfg.check_valid_camera_frame, "k", "check_valid_camera_frame", "Check that BODY-to-HEAD has been updated");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
