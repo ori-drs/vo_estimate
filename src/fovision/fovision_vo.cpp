@@ -12,7 +12,6 @@
 
 #include <lcmtypes/bot_core.hpp>
 #include <lcmtypes/multisense.hpp>
-#include <lcmtypes/microstrain.hpp>
 
 #include "drcvision/voconfig.hpp"
 #include "drcvision/vofeatures.hpp"
@@ -20,6 +19,7 @@
 #include "fovision.hpp"
 
 #include <pronto_utils/pronto_vis.hpp> // visualize pt clds
+#include <pronto_utils/pronto_conversions_lcm.hpp> // visualize pt clds
 #include <ConciseArgs>
 
 #include <path_util/path_util.h>
@@ -93,7 +93,7 @@ class StereoOdom{
     VoEstimator* estimator_;
 
     void featureAnalysis();
-    void updateMotion(int64_t utime);
+    void updateMotion(int64_t utime, int64_t prev_utime);
 
     void multisenseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void multisenseLDHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
@@ -233,7 +233,7 @@ void StereoOdom::featureAnalysis(){
 
 
 
-void StereoOdom::updateMotion(int64_t utime){
+void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   
   // Update the camera position in world frame
   Eigen::Isometry3d delta_camera;
@@ -251,9 +251,11 @@ void StereoOdom::updateMotion(int64_t utime){
   // Find the resultant delta by comparing the body position estimate with its previous
   Eigen::Isometry3d delta_body =  new_world_to_body * ( world_to_body_.inverse() );
 
+  Eigen::Isometry3d vel_body = pronto::getDeltaAsVelocity(delta_body, (utime-prev_utime) );
+
   if (cl_cfg_.output_signal ){
-    estimator_->publishPose(utime, "POSE_CAMERA_LEFT_ALT", world_to_camera_, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
-    estimator_->publishPose(utime, cl_cfg_.body_channel, new_world_to_body, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
+    estimator_->publishPose(utime, "POSE_CAMERA_LEFT_ALT", world_to_camera_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    estimator_->publishPose(utime, cl_cfg_.body_channel, new_world_to_body, vel_body.translation(), Eigen::Vector3d::Zero());
   }
   
   // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
@@ -317,7 +319,7 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
     std::cout << "StereoOdom::multisenseHandler | image pairings not understood\n";
     return;
   }
-  updateMotion(msg->utime);
+  updateMotion(msg->utime, utime_prev_);
 
   if(cl_cfg_.feature_analysis)
     featureAnalysis();
