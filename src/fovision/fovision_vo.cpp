@@ -233,6 +233,50 @@ void StereoOdom::featureAnalysis(){
 
 
 
+BotTrans getPoseAsBotTrans(Eigen::Isometry3d odo_delta){
+  BotTrans msgT;
+  memset(&msgT, 0, sizeof(msgT));
+  Eigen::Vector3d motion_T = odo_delta.translation();
+  Eigen::Quaterniond motion_R = Eigen::Quaterniond(odo_delta.rotation());
+  msgT.trans_vec[0] = motion_T(0);
+  msgT.trans_vec[1] = motion_T(1);
+  msgT.trans_vec[2] = motion_T(2);
+  msgT.rot_quat[0] = motion_R.w();
+  msgT.rot_quat[1] = motion_R.x();
+  msgT.rot_quat[2] = motion_R.y();
+  msgT.rot_quat[3] = motion_R.z();
+  
+  return msgT;
+}
+
+Eigen::Isometry3d getBotTransAsPose(BotTrans msgT){
+  Eigen::Isometry3d iso;
+  iso.setIdentity();
+  iso.translation().x() = msgT.trans_vec[0];
+  iso.translation().y() = msgT.trans_vec[1];
+  iso.translation().z() = msgT.trans_vec[2];
+  Eigen::Quaterniond motion_R = Eigen::Quaterniond(msgT.rot_quat[0], msgT.rot_quat[1], msgT.rot_quat[2], msgT.rot_quat[3]);
+  iso.rotate( motion_R );
+
+  return iso;
+}
+
+
+Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Isometry3d prev){
+  // this function isn't stable or doesnt work as envisaged... TODO: really need to solve this
+  // perhaps with Affine instead
+  //  Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( ref_body_pose_.inverse() );
+
+  BotTrans curr_BT = getPoseAsBotTrans(curr);
+  BotTrans prev_BT = getPoseAsBotTrans(prev);  
+  BotTrans diff_BT;
+  memset(&diff_BT, 0, sizeof(diff_BT));
+
+  bot_trans_invert_and_compose(&curr_BT, &prev_BT, &diff_BT);
+  Eigen::Isometry3d diff = getBotTransAsPose(diff_BT);
+  return diff;
+}
+
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   
   // Update the camera position in world frame
