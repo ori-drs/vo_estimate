@@ -67,18 +67,15 @@ void FoVision::send_status_msg(std::string text){
   lcm_->publish("SYSTEM_STATUS", &status_msg);
 }
 
+fovis::update_t FoVision::get_delta_translation_msg(Eigen::Isometry3d motion_estimate,
+    Eigen::MatrixXd motion_cov, int64_t timestamp, int64_t prev_timestamp){
 
-void FoVision::send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
-    Eigen::MatrixXd motion_cov, std::string channel_name){
-  
-  //Eigen::Isometry3d motion_estimate = odom_.getMotionEstimate();
-  //const Eigen::MatrixXd & motion_cov = odom_.getMotionEstimateCov();
   const fovis::MotionEstimator* me = odom_.getMotionEstimator();
   fovis::MotionEstimateStatusCode estim_status = odom_.getMotionEstimateStatus();
   
-  fovis_update_t update_msg;
-  update_msg.timestamp =  current_timestamp_;// msg->timestamp;//secs * 1E6 + nsecs/1E3;
-  update_msg.prev_timestamp = prev_timestamp_;
+  fovis::update_t update_msg;
+  update_msg.timestamp =  timestamp;
+  update_msg.prev_timestamp = prev_timestamp;
   Eigen::Vector3d motion_T = motion_estimate.translation();
   update_msg.translation[0] = motion_T(0);
   update_msg.translation[1] = motion_T(1);
@@ -100,7 +97,7 @@ void FoVision::send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
     case fovis::NO_DATA:
       break;
     case fovis::SUCCESS:
-      update_msg.estimate_status = FOVIS_UPDATE_T_ESTIMATE_VALID;
+      update_msg.estimate_status = fovis::update_t::ESTIMATE_VALID;
       if (verbose){
         //printf("Inliers: %4d  Rep. fail: %4d Matches: %4d Feats: %4d Mean err: %5.2f\n",
         //  me->getNumInliers(),
@@ -111,21 +108,21 @@ void FoVision::send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
       }
       break;
     case fovis::INSUFFICIENT_INLIERS:
-      update_msg.estimate_status = FOVIS_UPDATE_T_ESTIMATE_INSUFFICIENT_FEATURES;
+      update_msg.estimate_status = fovis::update_t::ESTIMATE_INSUFFICIENT_FEATURES;
       if (verbose){
         send_status_msg("Insufficient inliers");
         printf("Insufficient inliers\n");
       }
       break;
     case fovis::OPTIMIZATION_FAILURE:
-      update_msg.estimate_status = FOVIS_UPDATE_T_ESTIMATE_DEGENERATE;
+      update_msg.estimate_status = fovis::update_t::ESTIMATE_DEGENERATE;
       if (verbose){
         send_status_msg("Unable to solve for rigid body transform");
         printf("Unable to solve for rigid body transform\n");
       }
       break;
     case fovis::REPROJECTION_ERROR:
-      update_msg.estimate_status = FOVIS_UPDATE_T_ESTIMATE_REPROJECTION_ERROR;
+      update_msg.estimate_status = fovis::update_t::ESTIMATE_REPROJECTION_ERROR;
       if (verbose){
         std::stringstream ss;
         ss << "Excessive reprojection error: " << me->getMeanInlierReprojectionError();
@@ -139,12 +136,20 @@ void FoVision::send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
       }
       break;
   }
-  
-  if (estim_status !=  fovis::NO_DATA) {
-    fovis_update_t_publish(lcm_->getUnderlyingLCM(), 
-                channel_name.c_str(), &update_msg); //"FOVIS_REL_ODOMETRY"
-  }  
 
+  return update_msg;
+}
+
+
+
+void FoVision::send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
+    Eigen::MatrixXd motion_cov, std::string channel_name){
+  
+  fovis::update_t update_msg = get_delta_translation_msg(motion_estimate, motion_cov, current_timestamp_, prev_timestamp_);
+  
+  //if (estim_status !=  fovis::NO_DATA) {
+  lcm_->publish(channel_name.c_str(), &update_msg);
+  //}
 }
 
 void FoVision::fovis_stats(){
@@ -159,7 +164,7 @@ void FoVision::fovis_stats(){
   bool publish_pose=0;
 
   if (estim_status !=  fovis::NO_DATA && publish_fovis_stats) {
-    fovis_stats_t stats_msg;
+    fovis::stats_t stats_msg;
     stats_msg.timestamp = current_timestamp_;
     stats_msg.num_matches = me->getNumMatches();
     stats_msg.num_inliers = me->getNumInliers();
@@ -169,7 +174,7 @@ void FoVision::fovis_stats(){
     stats_msg.num_detected_keypoints = tf->getNumDetectedKeypoints();
     stats_msg.num_keypoints = tf->getNumKeypoints();
     stats_msg.fast_threshold = odom_.getFastThreshold();
-    fovis_stats_t_publish(lcm_->getUnderlyingLCM(), "FOVIS_STATS", &stats_msg);
+    lcm_->publish("FOVIS_STATS", &stats_msg);
   }  
   
   // publish current pose
@@ -186,7 +191,7 @@ void FoVision::fovis_stats(){
     Eigen::Quaterniond rotation(cam_to_local.rotation());
     rotation = rotation * M.transpose();  
   
-    bot_core_pose_t pose_msg;
+    bot_core::pose_t pose_msg;
     memset(&pose_msg, 0, sizeof(pose_msg));
     pose_msg.utime =   0;// msg->timestamp;
     pose_msg.pos[0] = translation[0];
@@ -196,7 +201,7 @@ void FoVision::fovis_stats(){
     pose_msg.orientation[1] = rotation.x();
     pose_msg.orientation[2] = rotation.y();
     pose_msg.orientation[3] = rotation.z();
-    bot_core_pose_t_publish(lcm_->getUnderlyingLCM(), "POSE_BODY", &pose_msg);
+    lcm_->publish("POSE_BODY", &pose_msg);
   }  
   
 }

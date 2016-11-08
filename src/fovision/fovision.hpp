@@ -13,11 +13,11 @@
 
 #include <lcm/lcm-cpp.hpp>
 
-#include <lcmtypes/bot_core.h>
 #include <fovis/fovis.hpp>
 
-#include <lcmtypes/fovis_stats_t.h>
-#include <lcmtypes/fovis_update_t.h>
+#include <lcmtypes/bot_core/pose_t.hpp>
+#include <lcmtypes/fovis/stats_t.hpp>
+#include <lcmtypes/fovis/update_t.hpp>
 
 #include <bot_lcmgl_client/lcmgl.h>
 #include "visualization.hpp"
@@ -41,6 +41,9 @@ public:
     void doOdometry(uint8_t *left_buf,float *disparity_buf, int64_t utime);
 
     void send_status_msg(std::string text);
+
+    fovis::update_t get_delta_translation_msg(Eigen::Isometry3d motion_estimate,
+      Eigen::MatrixXd motion_cov, int64_t timestamp, int64_t prev_timestamp);
     
     void send_delta_translation_msg(Eigen::Isometry3d motion_estimate,
       Eigen::MatrixXd motion_cov, std::string channel_name);
