@@ -275,9 +275,10 @@ Eigen::Isometry3d getBotTransAsPose(BotTrans msgT){
 
 
 Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Isometry3d prev){
-  // this function isn't stable or doesnt work as envisaged... TODO: really need to solve this
-  // perhaps with Affine instead
-  //  Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( ref_body_pose_.inverse() );
+  // the typical Isometry3d transformation I have used isn't stable or doesnt work as envisaged...
+  // Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( ref_body_pose_.inverse() );
+  // TODO: really need to solve this, perhaps with Affine instead
+  // In the meantime the BotTrans calculations used here are consistent with libbot
 
   BotTrans curr_BT = getPoseAsBotTrans(curr);
   BotTrans prev_BT = getPoseAsBotTrans(prev);  
@@ -292,7 +293,7 @@ Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Iso
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   
   if (vo_->getChangeReferenceFrames()){ // If we change reference frame, note the change for the next iteration.
-    std::cout << "ref frame from " << ref_utime_ << " to " << utime_cur_  << " " << (ref_utime_-utime_cur_)*1E-6 << "sec\n";
+    std::cout << "ref frame from " << ref_utime_ << " to " << utime_cur_  << " " << (utime_cur_-ref_utime_)*1E-6 << "sec\n";
     ref_utime_ = utime_cur_;
     ref_camera_pose_ = world_to_camera_;
     ref_body_pose_ = world_to_body_;
