@@ -48,6 +48,9 @@ struct CommandLineConfig
   bool draw_lcmgl;
   int which_vo_options;
   bool check_valid_camera_frame;
+
+  int process_skip;
+  int deltaroot_skip;
 };
 
 class StereoOdom{
@@ -89,8 +92,12 @@ class StereoOdom{
     uint8_t* left_buf_ref_; // copies of the reference images - probably can be extracted from fovis directly
     int64_t ref_utime_;
     Eigen::Isometry3d ref_camera_pose_; // pose of the camera when the reference frames changed
-    Eigen::Isometry3d ref_body_pose_; // pose of the body when the reference frames changed
     bool changed_ref_frames_;
+
+    int64_t deltaroot_utime_;
+    Eigen::Isometry3d deltaroot_body_pose_; // pose of the body when the reference frames changed
+    int deltaroot_counter_;
+    int frame_counter_; // counter of ALL received frames
 
     VoEstimator* estimator_;
 
@@ -134,7 +141,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   int reset =1;
   // obj: id name type reset
   // pts: id name type reset objcoll usergb rgb
-  pc_vis_->obj_cfg_list.push_back( obj_cfg(3004,"Reference Body Pose",5,reset) );
+  pc_vis_->obj_cfg_list.push_back( obj_cfg(3004,"Delta Root Body Pose",5,reset) );
   pc_vis_->obj_cfg_list.push_back( obj_cfg(3005,"Current Body Pose",5,reset) );
   pc_vis_->obj_cfg_list.push_back( obj_cfg(3006,"Relative Body Motion",5,reset) );
 
@@ -166,8 +173,8 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     std::cout << "Will Init internal est using VICON_pelvis_val\n";
     lcm_recv_->subscribe("VICON_pelvis_val",&StereoOdom::viconHandler,this); // |VICON_BODY|VICON_FRONTPLATE
   }else if(cl_cfg_.pose_init){
-    std::cout << "Will Init internal est using POSE_BODY_ALT\n";
-    lcm_recv_->subscribe("POSE_BODY_ALT",&StereoOdom::poseHandler,this);
+    std::cout << "qWill Init internal est using POSE_GROUND_TRUTH\n";
+    lcm_recv_->subscribe("POSE_GROUND_TRUTH",&StereoOdom::poseHandler,this);
   }else{
     std::cout << "Init internal est using default pose\n";
 
@@ -195,7 +202,8 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     pose_initialized_ = true;
   }
   
-  
+  deltaroot_counter_ = 0;
+  frame_counter_ = 0;
   imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
   cout <<"StereoOdom Constructed\n";
 }
@@ -229,16 +237,22 @@ void StereoOdom::featureAnalysis(){
         features_->setReferenceImage(left_buf_ref_);
         features_->setReferenceCameraPose( ref_camera_pose_ );
         features_->doFeatureProcessing(0); // 0 = send the FEATURES_REF
-
-        Isometry3dTime ref_body_poseT = Isometry3dTime(ref_utime_, ref_body_pose_);
-        pc_vis_->pose_to_lcm_from_list(3004, ref_body_poseT);
       }
     }
     changed_ref_frames_=false;
   }
 
   
-
+  if (vo_->getChangeReferenceFrames()){ // If we change reference frame, note the change for the next iteration.
+    //std::cout << "ref frame from " << ref_utime_ << " to " << utime_cur_  << " " << (utime_cur_-ref_utime_)*1E-6 << "sec\n";
+    //ref_utime_ = utime_cur_;
+    ref_camera_pose_ = world_to_camera_;
+    ref_utime_ = utime_cur_;
+    //deltaroot_body_pose_ = world_to_body_;
+    // TODO: only copy gray data if its grey
+    std::copy( left_buf_ , left_buf_ + 3*image_size_  , left_buf_ref_); // Keep the image buffer to draw the features in
+    changed_ref_frames_=true;
+  }
   
   counter++;
 }
@@ -276,7 +290,7 @@ Eigen::Isometry3d getBotTransAsPose(BotTrans msgT){
 
 Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Isometry3d prev){
   // the typical Isometry3d transformation I have used isn't stable or doesnt work as envisaged...
-  // Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( ref_body_pose_.inverse() );
+  // Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( deltaroot_body_pose_.inverse() );
   // TODO: really need to solve this, perhaps with Affine instead
   // In the meantime the BotTrans calculations used here are consistent with libbot
 
@@ -290,16 +304,14 @@ Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Iso
   return diff;
 }
 
+
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
-  
-  if (vo_->getChangeReferenceFrames()){ // If we change reference frame, note the change for the next iteration.
-    std::cout << "ref frame from " << ref_utime_ << " to " << utime_cur_  << " " << (utime_cur_-ref_utime_)*1E-6 << "sec\n";
-    ref_utime_ = utime_cur_;
-    ref_camera_pose_ = world_to_camera_;
-    ref_body_pose_ = world_to_body_;
-    // TODO: only copy gray data if its grey
-    std::copy( left_buf_ , left_buf_ + 3*image_size_  , left_buf_ref_); // Keep the image buffer to draw the features in
-    changed_ref_frames_=true;
+  deltaroot_counter_++;
+  if(deltaroot_counter_%cl_cfg_.deltaroot_skip == 0){
+    std::cout << "ref frame from " << deltaroot_utime_ << " to " << utime_cur_  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
+    //std::cout << "new ref body body\n";
+    deltaroot_utime_ = utime_cur_;
+    deltaroot_body_pose_ = world_to_body_;
   }
 
   // Update the camera position in world frame
@@ -321,8 +333,8 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   world_to_body_ = new_world_to_body;
 
   // 3 Get relative transform since last keyframe change:
-  //Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( ref_body_pose_.inverse() );
-  Eigen::Isometry3d delta_body_from_ref = Isometry_invert_and_compose(world_to_body_, ref_body_pose_);
+  //Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( deltaroot_body_pose_.inverse() );
+  Eigen::Isometry3d delta_body_from_ref = Isometry_invert_and_compose(world_to_body_, deltaroot_body_pose_);
 
 
   // 4. Output some signals
@@ -341,30 +353,19 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
 
   // 5b. output the per-keyframe delta:
   // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
-  fovis::update_t update_msg = vo_->get_delta_translation_msg(delta_body_from_ref, delta_camera_cov, utime, ref_utime_);
+  fovis::update_t update_msg = vo_->get_delta_translation_msg(delta_body_from_ref, delta_camera_cov, utime, deltaroot_utime_);
   lcm_pub_->publish("VO_DELTA_BODY_SINCE_REF", &update_msg);
 
   if (1==0){
+    Isometry3dTime deltaroot_body_poseT = Isometry3dTime(deltaroot_utime_, deltaroot_body_pose_);
+    pc_vis_->pose_to_lcm_from_list(3004, deltaroot_body_poseT);
+
     Isometry3dTime world_to_bodyT = Isometry3dTime(utime, world_to_body_);
     pc_vis_->pose_to_lcm_from_list(3009, world_to_bodyT);
 
     Isometry3dTime delta_body_from_refT = Isometry3dTime(utime, delta_body_from_ref);
     pc_vis_->pose_to_lcm_from_list(3006, delta_body_from_refT);
   }
-
-
-  /*
-
-
-  Eigen::Isometry3d t0t1_body_vo = Eigen::Isometry3d::Identity();
-  t0t1_body_vo.translation() = Eigen::Vector3d( update_msg.translation[0], update_msg.translation[1], update_msg.translation[2] );
-  t0t1_body_vo.rotate( Eigen::Quaterniond( update_msg.rotation[0], update_msg.rotation[1], update_msg.rotation[2], update_msg.rotation[3] ) );
-
-  Eigen::Isometry3d t1_body_vo = ref_body_pose_ * delta_body_from_ref;// t0t1_body_vo; // the pose of the robot as estimated by applyin3006g the VO translation on top of t0 state
-
-  Isometry3dTime t1_body_voT = Isometry3dTime(update_msg.timestamp, t1_body_vo);
-  pc_vis_->pose_to_lcm_from_list(3007, t1_body_voT);
-  */
 
 }
 
@@ -385,8 +386,13 @@ int pixel_convert_8u_rgb_to_8u_gray (uint8_t *dest, int dstride, int width,
   return 0;
 }
 
+
 void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
+  frame_counter_++;
+  if (frame_counter_% cl_cfg_.process_skip  != 0){
+    return;
+  }
 
   if (!pose_initialized_){
     return;
@@ -533,8 +539,10 @@ void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int6
 
   // Needed to set these frames properly at launch: TODO, this might need to be reconsidered
   ref_camera_pose_ = world_to_camera_;
-  ref_body_pose_ = world_to_body_;
   ref_utime_ = utime;
+  //
+  deltaroot_body_pose_ = world_to_body_;
+  deltaroot_utime_ = utime;
 
   std::cout << "Init state est using message\n";
   pose_initialized_ = TRUE;    
@@ -601,6 +609,8 @@ int main(int argc, char **argv){
   cl_cfg.which_vo_options = 1;
   cl_cfg.check_valid_camera_frame = TRUE;
 
+  cl_cfg.process_skip = 1;
+  cl_cfg.deltaroot_skip = 50;
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -618,6 +628,8 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
   parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use [1=slow,2=fast]");
   parser.add(cl_cfg.check_valid_camera_frame, "k", "check_valid_camera_frame", "Check that BODY-to-HEAD has been updated");
+  parser.add(cl_cfg.process_skip, "s", "process_skip", "Number of frames to skip per VO frame processed");
+  parser.add(cl_cfg.deltaroot_skip, "d", "deltaroot_skip", "Number of frames to skip between deltaroot updates");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
