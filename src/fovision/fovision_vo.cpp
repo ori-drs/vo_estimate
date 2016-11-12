@@ -346,7 +346,6 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
 
     estimator_->publishPose(utime, "POSE_CAMERA_LEFT_ALT", world_to_camera_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
     estimator_->publishPose(utime, cl_cfg_.body_channel, world_to_body_, vel_body.translation(), Eigen::Vector3d::Zero());
-
   }
 
   // 5a. output the per-frame delta:
@@ -388,7 +387,6 @@ int pixel_convert_8u_rgb_to_8u_gray (uint8_t *dest, int dstride, int width,
   }
   return 0;
 }
-
 
 void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
@@ -540,7 +538,8 @@ void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int6
   world_to_camera_ = world_to_body_init * body_to_camera;
   world_to_body_ = world_to_body_init;
 
-  // Needed to set these frames properly at launch: TODO, this might need to be reconsidered
+  // Needed to set these frames properly at launch: 
+  // TODO, this should be looked at again as I'm not sure this fully correct
   ref_camera_pose_ = world_to_camera_;
   ref_utime_ = utime;
   //
