@@ -173,7 +173,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     std::cout << "Will Init internal est using VICON_pelvis_val\n";
     lcm_recv_->subscribe("VICON_pelvis_val",&StereoOdom::viconHandler,this); // |VICON_BODY|VICON_FRONTPLATE
   }else if(cl_cfg_.pose_init){
-    std::cout << "qWill Init internal est using POSE_GROUND_TRUTH\n";
+    std::cout << "Will Init internal est using POSE_GROUND_TRUTH\n";
     lcm_recv_->subscribe("POSE_GROUND_TRUTH",&StereoOdom::poseHandler,this);
   }else{
     std::cout << "Init internal est using default pose\n";
