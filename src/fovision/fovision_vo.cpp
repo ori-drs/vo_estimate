@@ -39,8 +39,11 @@ struct CommandLineConfig
   std::string output_extension;
   bool output_signal;
   std::string body_channel;
-  bool vicon_init; // initializae off of vicon
-  bool pose_init; // or off of POSE_BODY_ALT
+  bool vicon_init; // initialize using vicon/rigid_transform_t
+  std::string vicon_init_channel;
+  bool pose_init; // initialize using pose_t
+  std::string pose_init_channel;
+
   std::string input_channel;
   bool verbose;
   std::string in_log_fname;
@@ -170,11 +173,11 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
  
   pose_initialized_ = false;
   if (cl_cfg_.vicon_init){
-    std::cout << "Will Init internal est using VICON_pelvis_val\n";
-    lcm_recv_->subscribe("VICON_pelvis_val",&StereoOdom::viconHandler,this); // |VICON_BODY|VICON_FRONTPLATE
+    std::cout << "Will Init internal est using "  << cl_cfg_.vicon_init_channel << " message\n";
+    lcm_recv_->subscribe(cl_cfg_.vicon_init_channel, &StereoOdom::viconHandler,this);
   }else if(cl_cfg_.pose_init){
-    std::cout << "Will Init internal est using POSE_GROUND_TRUTH\n";
-    lcm_recv_->subscribe("POSE_GROUND_TRUTH",&StereoOdom::poseHandler,this);
+    std::cout << "Will Init internal est using " << cl_cfg_.pose_init_channel << " message\n";
+    lcm_recv_->subscribe(cl_cfg_.pose_init_channel, &StereoOdom::poseHandler,this);
   }else{
     std::cout << "Init internal est using default pose\n";
 
@@ -598,7 +601,9 @@ int main(int argc, char **argv){
   cl_cfg.body_channel = "POSE_BODY_USING_CAMERA";
   cl_cfg.feature_analysis = FALSE; 
   cl_cfg.vicon_init = FALSE;
-  cl_cfg.pose_init = FALSE;  
+  cl_cfg.vicon_init_channel = "VICON_pelvis_val";
+  cl_cfg.pose_init = FALSE;
+  cl_cfg.pose_init_channel = "POSE_BODY_ALT";
   cl_cfg.fusion_mode = 0;
   cl_cfg.output_extension = "";
   cl_cfg.in_log_fname = "";
@@ -618,8 +623,10 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");    
-  parser.add(cl_cfg.vicon_init, "vi", "vicon_init", "Bootstrap internal estimate using VICON_pelvis_val");
-  parser.add(cl_cfg.pose_init, "pi", "pose_init", "Bootstrap internal estimate using POSE_BODY_ALT");
+  parser.add(cl_cfg.vicon_init, "vi", "vicon_init", "Bootstrap internal estimate using a vicon rigid_transform_t msg");
+  parser.add(cl_cfg.vicon_init_channel, "vc", "vicon_init_channel", "If initialising with a rigid_transform_t msg, use this channel");
+  parser.add(cl_cfg.pose_init, "pi", "pose_init", "Bootstrap internal estimate using a pose_t message");
+  parser.add(cl_cfg.pose_init_channel, "pc", "pose_init_channel", "If initialising with a pose message, use this channel");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
