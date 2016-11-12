@@ -6,7 +6,6 @@
 #include <lcm/lcm-cpp.hpp>
 
 #include "lcmtypes/bot_core.hpp"
-#include <lcmtypes/microstrain.hpp>
 #include <ConciseArgs>
 
 #include <Eigen/Dense>
@@ -29,8 +28,8 @@ class Pass{
     bool verbose_;
     std::string ins_channel_;
     
-    void insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  microstrain::ins_t* msg);   
-    microstrain::ins_t lidar_msgout_;
+    void insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg);   
+    bot_core::ins_t lidar_msgout_;
 };
 
 Pass::Pass(boost::shared_ptr<lcm::LCM> &lcm_, bool verbose_,
@@ -42,7 +41,7 @@ Pass::Pass(boost::shared_ptr<lcm::LCM> &lcm_, bool verbose_,
 }
 
 
-void Pass::insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  microstrain::ins_t* msg){
+void Pass::insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg){
   Eigen::Quaterniond meas_rot(msg->quat[0],msg->quat[1],msg->quat[2],msg->quat[3]);
   Eigen::Matrix3d meas_rotation(meas_rot);
 
