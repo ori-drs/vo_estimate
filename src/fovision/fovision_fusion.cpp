@@ -14,7 +14,6 @@
 #include <bot_frames_cpp/bot_frames_cpp.hpp>
 
 #include <lcmtypes/bot_core.hpp>
-#include <lcmtypes/multisense.hpp>
 
 #include "drcvision/voconfig.hpp"
 #include "drcvision/vofeatures.hpp"
