@@ -25,7 +25,7 @@ class VoEstimator
 {
 public:
   VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes_, 
-              std::string channel_extension_ = "");
+              std::string channel_extension_ = "", std::string camera_config_ = "CAMERA");
   ~VoEstimator();
 
   void updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isometry3d delta_camera);
@@ -56,6 +56,7 @@ private:
   bot::frames* botframes_cpp_;
 
   std::string channel_extension_;
+  std::string camera_config_;
   Eigen::Isometry3d camera_to_body_;
   Eigen::Isometry3d local_to_body_;
   

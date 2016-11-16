@@ -148,7 +148,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
 
   vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, cl_cfg_.which_vo_options);
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
-  estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension );
+  estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension, cl_cfg_.camera_config );
 
   Eigen::Isometry3d init_pose;
   init_pose = Eigen::Isometry3d::Identity();
@@ -162,7 +162,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
   // This assumes the imu to body frame is fixed, need to update if the neck is actuated
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, body_to_imu_);
-  botframes_cpp_->get_trans_with_utime( botframes_ ,  "imu", "CAMERA_LEFT", 0, imu_to_camera_);
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "imu",  string( cl_cfg_.camera_config + "_LEFT" ).c_str(), 0, imu_to_camera_);
 
   if( cl_cfg_.output_signal_at_10Hz ){
     std::cout << "Opened fovision_pose_body.txt\n";
@@ -570,8 +570,8 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
 
 int main(int argc, char **argv){
   CommandLineConfig cl_cfg;
-  cl_cfg.camera_config = "CAMERA";
-  cl_cfg.input_channel = "CAMERA";
+  cl_cfg.camera_config = "MULTISENSE_CAMERA";
+  cl_cfg.input_channel = "MULTISENSE_CAMERA";
   cl_cfg.output_signal = "POSE_BODY";
   cl_cfg.output_signal_at_10Hz = FALSE;
   cl_cfg.feature_analysis = FALSE; 
@@ -596,7 +596,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
   parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");  
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 rpy, 3 rp only, (both continuous)");
-  parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
+  parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
   parser.add(cl_cfg.correction_frequency, "y", "correction_frequency", "Correct the R/P every XX IMU measurements");
   parser.add(cl_cfg.verbose, "v", "verbose", "Verbose printf");

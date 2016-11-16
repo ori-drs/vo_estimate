@@ -166,7 +166,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
 
   vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, cl_cfg_.which_vo_options);
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
-  estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension );
+  estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension, cl_cfg_.camera_config );
   lcm_recv_->subscribe( cl_cfg_.input_channel,&StereoOdom::multisenseHandler,this);
 
  
@@ -326,7 +326,7 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   
   // 1 Determine the body position in world frame using the camera frame
   Eigen::Isometry3d camera_to_body;
-  int status = botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "CAMERA_LEFT"  , utime, camera_to_body);
+  int status = botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", string( cl_cfg_.camera_config + "_LEFT" ).c_str()  , utime, camera_to_body);
   Eigen::Isometry3d new_world_to_body = world_to_camera_ * camera_to_body;  
 
   // 2 Find the delta in body motion by comparing the body position estimate with its previous
@@ -525,7 +525,7 @@ void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int6
     // Because body to CAMERA comes through FK, need to get an updated frame (BODY_TO_HEAD)
     int64_t timestamp;
     int status  = bot_frames_get_latest_timestamp(botframes_, 
-                                        "CAMERA_LEFT" , "body", &timestamp);    
+                                        string( cl_cfg_.camera_config + "_LEFT" ).c_str() , "body", &timestamp);    
     if (timestamp==0){
       std::cout << "CAMERA_LEFT to body not updated, not initialising yet\n";
       std::cout << "This check if for articulated joints between head and body\n";
@@ -533,7 +533,7 @@ void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int6
     }
   }
 
-  Eigen::Isometry3d body_to_camera = botframes_cpp_->get_trans_with_utime(botframes_, "CAMERA_LEFT" , "body", utime);
+  Eigen::Isometry3d body_to_camera = botframes_cpp_->get_trans_with_utime(botframes_, string( cl_cfg_.camera_config + "_LEFT" ).c_str() , "body", utime);
   world_to_camera_ = world_to_body_init * body_to_camera;
   world_to_body_ = world_to_body_init;
 

@@ -1,14 +1,14 @@
 #include "voestimator.hpp"
 
 VoEstimator::VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes_,
-  std::string channel_extension_):
-  lcm_(lcm_), botframes_(botframes_), channel_extension_(channel_extension_),
+  std::string channel_extension_, std::string camera_config_):
+  lcm_(lcm_), botframes_(botframes_), channel_extension_(channel_extension_), camera_config_(camera_config_),
   pose_initialized_(false), vo_initialized_(false){
   local_to_body_.setIdentity();
 
   // Assume head to camera is rigid:
   // TODO: remove bot frames dependency by providing this transform in constructor:
-  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "CAMERA_LEFT", 0, camera_to_body_);
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", std::string(camera_config_ + "_LEFT").c_str(), 0, camera_to_body_);
   
   // Vis Config:
   pc_vis_ = new pronto_vis( lcm_->getUnderlyingLCM() );
