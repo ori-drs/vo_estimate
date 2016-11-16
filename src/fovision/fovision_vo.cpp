@@ -593,8 +593,8 @@ void StereoOdom::poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& 
 
 int main(int argc, char **argv){
   CommandLineConfig cl_cfg;
-  cl_cfg.camera_config = "CAMERA";
-  cl_cfg.input_channel = "CAMERA";
+  cl_cfg.camera_config = "MULTISENSE_CAMERA";
+  cl_cfg.input_channel = "MULTISENSE_CAMERA";
   cl_cfg.output_signal = FALSE;
   cl_cfg.body_channel = "POSE_BODY_USING_CAMERA";
   cl_cfg.feature_analysis = FALSE; 
@@ -616,7 +616,7 @@ int main(int argc, char **argv){
   cl_cfg.deltaroot_skip = 50;
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
-  parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
+  parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: MULTISENSE_CAMERA, stereo, stereo_with_letterbox");
   parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_CAMERA_LEFT_ALT and body estimates");
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
   parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
@@ -626,7 +626,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.pose_init, "pi", "pose_init", "Bootstrap internal estimate using a pose_t message");
   parser.add(cl_cfg.pose_init_channel, "pc", "pose_init_channel", "If initialising with a pose message, use this channel");
   parser.add(cl_cfg.fusion_mode, "m", "fusion_mode", "0 none, 1 at init, 2 every second, 3 init from gt, then every second");
-  parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - CAMERA or CAMERA_BLACKENED");
+  parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - MULTISENSE_CAMERA or CAMERA_BLACKENED");
   parser.add(cl_cfg.output_extension, "o", "output_extension", "Extension to pose channels (e.g. '_VO' ");
   parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");

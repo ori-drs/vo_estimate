@@ -97,7 +97,7 @@ int main( int argc, char** argv ){
   ConciseArgs parser(argc, argv, "blacken-image");
   bool verbose=false;
   int row_remove = 725;
-  string input_channel="CAMERA";
+  string input_channel="MULTISENSE_CAMERA";
   string output_channel="CAMERA_BLACKENED";
   parser.add(verbose, "v", "verbose", "Verbosity");
   parser.add(input_channel, "l", "input_channel", "Incoming channel");
