@@ -23,7 +23,7 @@ class Pass{
 
 Pass::Pass(boost::shared_ptr<lcm::LCM> &lcm_, double min_range_):
     lcm_(lcm_), min_range_(min_range_){
-  input_channel_ = "SCAN";
+  input_channel_ = "MULTISENSE_SCAN";
   lcm_->subscribe( input_channel_ ,&Pass::lidarHandler,this);
   cout << "Finished setting up\n";
 }
@@ -36,7 +36,7 @@ void Pass::lidarHandler(const lcm::ReceiveBuffer* rbuf, const std::string& chann
     last_lidar_msg_.ranges[i] = 30;
     }
   }
-  lcm_->publish( "SCAN_FREE" , &last_lidar_msg_ );
+  lcm_->publish( "MULTISENSE_SCAN_FREE" , &last_lidar_msg_ );
 }
 
 int main( int argc, char** argv ){
