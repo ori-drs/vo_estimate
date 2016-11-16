@@ -10,7 +10,6 @@ add_library(fovision SHARED fovision.cpp
 pods_use_pkg_config_packages(fovision eigen3 libfovis bot2-lcmgl-client)
 
 target_link_libraries(fovision 
-       lcmtypes_fovis-bot2   
        lcmtypes_bot2-core
     boost_thread      
     boost_program_options)
@@ -30,7 +29,7 @@ add_executable (se-simple-fusion fovision_fusion.cpp)
 target_link_libraries(se-simple-fusion boost_system)
 pods_use_pkg_config_packages(se-simple-fusion eigen3
   lcm bot2-core bot2-frames   bot2-frames_cpp
-  lcmtypes_bot2-core  lcmtypes_fovis-bot2 zlib
+  lcmtypes_bot2-core  zlib
   voconfig   vofeatures   voestimator   fovision
   pronto_vis  
   opencv image_io_utils
@@ -43,7 +42,7 @@ add_executable (se-simple-vo fovision_vo.cpp)
 target_link_libraries(se-simple-vo boost_system)
 pods_use_pkg_config_packages(se-simple-vo eigen3 
   lcm bot2-core bot2-frames   bot2-frames_cpp
-  lcmtypes_bot2-core  lcmtypes_fovis-bot2 zlib
+  lcmtypes_bot2-core  zlib
   voconfig   vofeatures   voestimator   fovision
   pronto_vis  
   opencv image_io_utils
