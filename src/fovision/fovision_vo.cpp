@@ -172,10 +172,10 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
  
   pose_initialized_ = false;
   if (cl_cfg_.vicon_init){
-    std::cout << "Will Init internal est using "  << cl_cfg_.vicon_init_channel << " message\n";
+    std::cout << "Will Init internal est using "  << cl_cfg_.vicon_init_channel << " message [vicon/rigid_trans]\n";
     lcm_recv_->subscribe(cl_cfg_.vicon_init_channel, &StereoOdom::viconHandler,this);
   }else if(cl_cfg_.pose_init){
-    std::cout << "Will Init internal est using " << cl_cfg_.pose_init_channel << " message\n";
+    std::cout << "Will Init internal est using " << cl_cfg_.pose_init_channel << " message [pose]\n";
     lcm_recv_->subscribe(cl_cfg_.pose_init_channel, &StereoOdom::poseHandler,this);
   }else{
     std::cout << "Init internal est using default pose\n";
