@@ -43,6 +43,8 @@ struct CommandLineConfig
   bool pose_init; // initialize using pose_t
   std::string pose_init_channel;
 
+  std::string deltaroot_reset_channel;
+
   std::string input_channel;
   bool verbose;
   std::string in_log_fname;
@@ -112,6 +114,9 @@ class StereoOdom{
 
     void viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::rigid_transform_t* msg);
     void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
+
+    void deltaResetHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
+
     void initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime);
 
     bool pose_initialized_;
@@ -204,7 +209,9 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     pose_initialized_ = true;
   }
   
+  lcm_recv_->subscribe( cl_cfg_.deltaroot_reset_channel,&StereoOdom::deltaResetHandler,this);
   deltaroot_counter_ = 0;
+
   frame_counter_ = 0;
   imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
   cout <<"StereoOdom Constructed\n";
@@ -309,7 +316,9 @@ Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Iso
 
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   deltaroot_counter_++;
+  //std::cout << "counter: " << deltaroot_counter_ << "\n";
   if(deltaroot_counter_%cl_cfg_.deltaroot_skip == 0){
+    //std::cout << "counter: " << deltaroot_counter_ << " reset\n";
     std::cout << "ref frame from " << deltaroot_utime_ << " to " << utime_cur_  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
     //std::cout << "new ref body body\n";
     deltaroot_utime_ = utime_cur_;
@@ -463,6 +472,12 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
   return;
 }
 
+void StereoOdom::deltaResetHandler(const lcm::ReceiveBuffer* rbuf,
+     const std::string& channel, const  bot_core::pose_t* msg){
+  std::cout << "Got message on channel " << channel << ", will reset deltaroot\n";
+  deltaroot_counter_ = -1;
+}
+
 
 void StereoOdom::multisenseLRHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
@@ -612,6 +627,8 @@ int main(int argc, char **argv){
   cl_cfg.which_vo_options = 1;
   cl_cfg.check_valid_camera_frame = TRUE;
 
+  cl_cfg.deltaroot_reset_channel = "DELTA_RESET";
+
   cl_cfg.process_skip = 1;
   cl_cfg.deltaroot_skip = 50;
 
@@ -635,6 +652,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.check_valid_camera_frame, "k", "check_valid_camera_frame", "Check that BODY-to-HEAD has been updated");
   parser.add(cl_cfg.process_skip, "s", "process_skip", "Number of frames to skip per VO frame processed");
   parser.add(cl_cfg.deltaroot_skip, "d", "deltaroot_skip", "Number of frames to skip between deltaroot updates");
+  parser.add(cl_cfg.deltaroot_reset_channel, "r", "deltaroot_reset_channel", "Channel to listen for a delta reset command");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
