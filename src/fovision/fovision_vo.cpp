@@ -248,7 +248,9 @@ void StereoOdom::featureAnalysis(){
     if (ref_utime_ > 0){ // skip the first null image
       if(vo_->getNumMatches() > 200){ // if less than 50 features - dont bother writing
       // was:      if(featuresA.size() > 50){ // if less than 50 features - dont bother writing
-        cout << "ref frame from " << utime_prev_ << " at " << utime_cur_ <<  " with " <<vo_->getNumMatches()<<" matches\n";
+        std::cout.precision(17);
+        cout << "VO keyframe changed from " << utime_prev_*1E-6 << " at " << utime_cur_*1E-6 <<  " with " <<vo_->getNumMatches()<<" matches\n";
+        std::cout.precision(6);
         features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , ref_utime_);
         features_->setReferenceImage(left_buf_ref_);
         features_->setReferenceCameraPose( ref_camera_pose_ );
@@ -322,12 +324,14 @@ Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Iso
 
 
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
+
+  // 0. Reset the deltaroot. This can happen either after a set number of frames
+  // or after a failure of the VO algorithm
   deltaroot_counter_++;
-  //std::cout << "counter: " << deltaroot_counter_ << "\n";
   if(deltaroot_counter_%cl_cfg_.deltaroot_skip == 0){
-    //std::cout << "counter: " << deltaroot_counter_ << " reset\n";
-    std::cout << "ref frame from " << deltaroot_utime_ << " to " << utime_cur_  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
-    //std::cout << "new ref body body\n";
+    std::cout.precision(17);
+    std::cout << "Delta root frame changed from " << (deltaroot_utime_*1E-6) << " to " << (utime_cur_*1E-6)  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
+    std::cout.precision(6);
     deltaroot_utime_ = utime_cur_;
     deltaroot_body_pose_ = world_to_body_;
   }
@@ -362,15 +366,22 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
     estimator_->publishPose(utime, cl_cfg_.body_channel, world_to_body_, vel_body.translation(), Eigen::Vector3d::Zero());
   }
 
-  // 5a. output the per-frame delta:
+
+  if (delta_status != fovis::SUCCESS){
+    std::cout << "Not sending delta travelled, resetting\n";
+    deltaroot_counter_ = -1;
+    return;
+  }
+
   // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
+  // 5a. output the per-frame delta:
   vo_->send_delta_translation_msg(delta_body,
           delta_camera_cov, "VO_DELTA_BODY" );  
-
-  // 5b. output the per-keyframe delta:
-  // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
+  // 5b. output the per-keyframe delta for the last period
   fovis::update_t update_msg = vo_->get_delta_translation_msg(delta_body_from_ref, delta_camera_cov, utime, deltaroot_utime_);
   lcm_pub_->publish("VO_DELTA_BODY_SINCE_REF", &update_msg);
+  //std::cout << delta_body_from_ref.translation().transpose() << "\n";
+
 
   if (1==0){
     Isometry3dTime deltaroot_body_poseT = Isometry3dTime(deltaroot_utime_, deltaroot_body_pose_);
