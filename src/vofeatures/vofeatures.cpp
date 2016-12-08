@@ -184,7 +184,7 @@ void VoFeatures::doFeatureProcessing(bool useCurrent, bool writeOutput){
 
 void VoFeatures::drawFeaturesOnImage(cv::Mat &img, std::vector<ImageFeature> &features,
     std::vector<int> &feature_indices){
-  CvScalar color_out = CV_RGB(255,0,0);
+  CvScalar color_out = CV_RGB(255,255,255);
   for (size_t j=0;j< features.size(); j++){
     if (feature_indices[j]){
       cv::Point p0;

@@ -55,6 +55,8 @@ struct CommandLineConfig
 
   int process_skip;
   int deltaroot_skip;
+
+  bool filter_disparity;
 };
 
 class StereoOdom{
@@ -118,6 +120,8 @@ class StereoOdom{
     void deltaResetHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
 
     void initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime);
+
+    void republishImage(const  bot_core::images_t* msg);
 
     bool pose_initialized_;
     
@@ -347,7 +351,6 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   //Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( deltaroot_body_pose_.inverse() );
   Eigen::Isometry3d delta_body_from_ref = Isometry_invert_and_compose(world_to_body_, deltaroot_body_pose_);
 
-
   // 4. Output some signals
   if (cl_cfg_.output_signal ){
     Eigen::Isometry3d vel_body = pronto::getDeltaAsVelocity(delta_body, (utime-prev_utime) );
@@ -459,7 +462,7 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
     std::cout << "StereoOdom depth type not understood\n";
     exit(-1);
   }
-  
+
   // Convert Carnegie disparity format into floating point disparity. Store in local buffer
   Mat disparity_orig_temp = Mat::zeros(h,w,CV_16UC1); // h,w
   disparity_orig_temp.data = (uchar*) decompress_disparity_buf_;   // ... is a simple assignment possible?  
@@ -468,9 +471,97 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
   disparity_buf_.resize(h * w);
   cv::Mat_<float> disparity(h, w, &(disparity_buf_[0]));
   disparity = disparity_orig / 16.0;
-  
+
+
+  // Filter the data to remove far away depth and the crash bar (from hyq)
+  // TODO: measure how long this takes, it can be implemented more efficiently
+  // depth  =  focal_length * base  / disparity
+  float disp_low_threshold = 7.0; // 5.5m  use some where between 7 and 15
+  float disp_high_threshold = 75.0; // 0.86=45disp | 0.75m=75disp
+  int row_filter = 720; // filter the lower part of the image
+  if (cl_cfg_.filter_disparity){
+    for(int v=0; v<h; v++) { // t2b
+      for(int u=0; u<w; u++ ) {  //l2r
+
+        if (v > row_filter){
+          disparity_buf_[w*v + u] = 0;
+          //left_buf_[w*v + u] = 0;
+        }else{
+          float val = disparity_buf_[w*v + u];
+          if (val < disp_low_threshold){
+            disparity_buf_[w*v + u] = 0;
+            //left_buf_[w*v + u] = 100;
+          } else if (val > disp_high_threshold){
+            disparity_buf_[w*v + u] = 0;
+            //left_buf_[w*v + u] = 100;
+          }
+        }
+      }
+    }
+  }
+  // republishImage(msg);
+ 
   return;
 }
+
+
+void StereoOdom::republishImage(const  bot_core::images_t* msg){
+  int width = msg->images[0].width;
+  int height = msg->images[0].height;
+
+  bot_core::image_t msgout_image;
+  msgout_image.utime = msg->utime;
+  msgout_image.width = width;
+  msgout_image.height = height;
+  msgout_image.row_stride = width;
+  msgout_image.size = width*height;
+  msgout_image.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY;
+  msgout_image.data.resize( width*height );
+  memcpy(msgout_image.data.data(), left_buf_, width*height );
+  msgout_image.nmetadata =0;
+  lcm_pub_->publish("MMM", &msgout_image);
+
+  bot_core::image_t msgout_depth;
+  msgout_depth.utime = msg->utime;
+  msgout_depth.width = width;
+  msgout_depth.height = height;
+  msgout_depth.row_stride = 2*width;
+  msgout_depth.size = 2*width*height;
+  msgout_depth.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY; // false, no info
+  msgout_depth.data.resize( 2*width*height );
+  memcpy(msgout_depth.data.data(), decompress_disparity_buf_, 2*width*height );
+  msgout_depth.nmetadata =0;
+  //lcm_pub_->publish("MMM2", &msgout_depth);
+
+  bot_core::images_t msgo;
+  msgo.utime = msg->utime;
+  msgo.n_images = 2;
+  msgo.images.resize(2);
+  msgo.image_types.resize(2);
+  msgo.image_types[0] = bot_core::images_t::LEFT;
+  msgo.image_types[1] = bot_core::images_t::DISPARITY;
+  msgo.images[0] = msg->images[0];
+  msgo.images[1] = msgout_depth;
+  lcm_pub_->publish( "CAMERA_FILTERED" , &msgo);
+
+  /*
+  ofstream myfile;
+  myfile.open ("example.txt");
+  //myfile << "Writing this to a file.\n";
+  for(int v=0; v<h; v++) { // t2b
+    std::stringstream ss;
+    for(int u=0; u<w; u++ ) {  //l2r
+      ss << (float) disparity_buf_[w*v + u] << " ";
+      // cout <<j2 << " " << v << " " << u << " | " <<  points(v,u)[0] << " " <<  points(v,u)[1] << " " <<  points(v,u)[1] << "\n";
+      // std::cout <<  << " " << v << " " << u << "\n";
+    }
+    myfile << ss.str() << "\n";
+  }
+  myfile.close();
+  std::cout << "writing\n";
+  */
+}
+
 
 void StereoOdom::deltaResetHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::pose_t* msg){
@@ -631,6 +722,7 @@ int main(int argc, char **argv){
 
   cl_cfg.process_skip = 1;
   cl_cfg.deltaroot_skip = 50;
+  cl_cfg.filter_disparity = TRUE;
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: MULTISENSE_CAMERA, stereo, stereo_with_letterbox");
@@ -653,9 +745,11 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.process_skip, "s", "process_skip", "Number of frames to skip per VO frame processed");
   parser.add(cl_cfg.deltaroot_skip, "d", "deltaroot_skip", "Number of frames to skip between deltaroot updates");
   parser.add(cl_cfg.deltaroot_reset_channel, "r", "deltaroot_reset_channel", "Channel to listen for a delta reset command");
+  parser.add(cl_cfg.filter_disparity, "y", "filter_disparity", "Filter disparities using hard coded settings, typically true");  
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";
+  cout << (int) cl_cfg.filter_disparity << " is filter_disparity\n";
 
   cl_cfg.param_file = std::string(getConfigPath()) +'/' + std::string(param_file);
   if (param_file.empty()) { // get param from lcm
