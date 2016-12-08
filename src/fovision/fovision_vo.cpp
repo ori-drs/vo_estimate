@@ -174,6 +174,9 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   
 
   vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, cl_cfg_.which_vo_options);
+  if ( cl_cfg_.feature_analysis ){
+    vo_->setPublishFovisStats(TRUE);
+  }
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
   estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension, cl_cfg_.camera_config );
   lcm_recv_->subscribe( cl_cfg_.input_channel,&StereoOdom::multisenseHandler,this);

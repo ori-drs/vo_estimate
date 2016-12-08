@@ -21,6 +21,10 @@ FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
     bot_lcmgl_t* lcmgl = bot_lcmgl_init(lcm_->getUnderlyingLCM(), "stereo-odometry");
     visualization_ = new Visualization(lcmgl, kcal.get());
   }
+
+  publish_fovis_stats_ = 0;
+  publish_pose_ = 0;
+
 }
 
 
@@ -160,10 +164,7 @@ void FoVision::fovis_stats(){
   const fovis::MotionEstimator* me = odom_.getMotionEstimator();
   fovis::MotionEstimateStatusCode estim_status = odom_.getMotionEstimateStatus();
   
-  bool publish_fovis_stats=0;
-  bool publish_pose=0;
-
-  if (estim_status !=  fovis::NO_DATA && publish_fovis_stats) {
+  if (estim_status !=  fovis::NO_DATA && publish_fovis_stats_) {
     fovis::stats_t stats_msg;
     stats_msg.timestamp = current_timestamp_;
     stats_msg.num_matches = me->getNumMatches();
@@ -178,7 +179,7 @@ void FoVision::fovis_stats(){
   }  
   
   // publish current pose
-  if (publish_pose) {
+  if (publish_pose_) {
     
     // rotate coordinate frame so that look vector is +X, and up is +Z
     Eigen::Matrix3d M;
