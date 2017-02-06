@@ -1,5 +1,5 @@
-#ifndef registeration_HPP_
-#define registeration_HPP_
+#ifndef vis_loop_closure_HPP_
+#define vis_loop_closure_HPP_
 
 #include <lcm/lcm-cpp.hpp>
 
@@ -21,7 +21,7 @@
 #include "drcvision/vofeatures.hpp"
 
 
-struct RegisterationConfig
+struct VisLoopClosureConfig
 {
   int min_inliers; // 60 used by Hordur, might want to use a higher number
   bool verbose;
@@ -42,7 +42,7 @@ struct FrameMatch{
   // Modes: SUCCESS, INSUFFICIENT_INLIERS,  OPTIMIZATION_FAILURE, REPROJECTION_ERROR
   Eigen::Isometry3d delta; // A->B transform : where is B relative to A
   int n_inliers;
-  int n_registeration_inliers; // number of inliers retried from the transfromation estimation
+  int n_registration_inliers; // number of inliers retried from the transfromation estimation
   // TODO: not sure if these are different 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -50,13 +50,13 @@ struct FrameMatch{
 typedef boost::shared_ptr<FrameMatch> FrameMatchPtr;
 
 
-class Registeration
+class VisLoopClosure
 {
   public:
-    typedef boost::shared_ptr<Registeration> Ptr;
-    typedef boost::shared_ptr<const Registeration> ConstPtr;
+    typedef boost::shared_ptr<VisLoopClosure> Ptr;
+    typedef boost::shared_ptr<const VisLoopClosure> ConstPtr;
     
-    Registeration (boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_);
+    VisLoopClosure (boost::shared_ptr<lcm::LCM> &lcm_, const VisLoopClosureConfig& reg_cfg_);
 
     void read_features(std::string fname,
         std::vector<ImageFeature>& features);
@@ -80,7 +80,7 @@ class Registeration
         std::vector<std::string> &utimes_strings);
 
   private:
-    const RegisterationConfig reg_cfg_;    
+    const VisLoopClosureConfig reg_cfg_;    
 
     boost::shared_ptr<lcm::LCM> lcm_;
 
