@@ -29,7 +29,7 @@
 #include <bot_lcmgl_client/lcmgl.h>
 
 
-#include "registeration.hpp"
+#include "vis-loop-closure.hpp"
 
 
 #include <pronto_utils/pronto_vis.hpp>
@@ -50,7 +50,7 @@ void toc(std::string message){
 
 
 
-Registeration::Registeration(boost::shared_ptr<lcm::LCM> &lcm_, const RegisterationConfig& reg_cfg_):
+VisLoopClosure::VisLoopClosure(boost::shared_ptr<lcm::LCM> &lcm_, const VisLoopClosureConfig& reg_cfg_):
         lcm_(lcm_),reg_cfg_(reg_cfg_){
   std::string camera_config = "CAMERA";
 
@@ -164,7 +164,7 @@ void features2cloud(std::vector<ImageFeature> features, pcl::PointCloud<pcl::Poi
 
 
 
-void Registeration::send_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
+void VisLoopClosure::send_both_reg(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
     Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1,
     int64_t utime0, int64_t utime1           ){
 
@@ -215,7 +215,7 @@ void draw_inliers(cv::Mat &imgs, std::vector<ImageFeature> features0,    std::ve
 }
 
 
-void Registeration::send_both_reg_inliers(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
+void VisLoopClosure::send_both_reg_inliers(std::vector<ImageFeature> features0,    std::vector<ImageFeature> features1,
     Eigen::Isometry3d pose0,   Eigen::Isometry3d pose1,
     std::vector<int> feature_inliers0,    std::vector<int> feature_inliers1 ,
     int64_t utime0, int64_t utime1){
@@ -275,7 +275,7 @@ void compute_descriptors(cv::Mat &image, vector<ImageFeature> & features, std::s
 }
 
 
-void Registeration::read_features(std::string fname,
+void VisLoopClosure::read_features(std::string fname,
     std::vector<ImageFeature>& features ){
 
   //printf( "About to read: %s - ",fname.c_str());
@@ -388,7 +388,7 @@ void pose_estimate(FrameMatchPtr match,
 
 
 
-void Registeration::align_images(cv::Mat &img0, cv::Mat &img1, 
+void VisLoopClosure::align_images(cv::Mat &img0, cv::Mat &img1, 
                            std::vector<ImageFeature> &features0, std::vector<ImageFeature> &features1,
                            int64_t utime0, int64_t utime1, FrameMatchPtr &match){
 
@@ -526,17 +526,17 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
     match->featuresA_indices.resize(j);
     match->featuresB_indices.resize(j);
     match->n_inliers = inliers.size();//
-    match->n_registeration_inliers = std::accumulate(inliers.begin(), inliers.end(), 0);
+    match->n_registration_inliers = std::accumulate(inliers.begin(), inliers.end(), 0);
 
   } else {
     // TODO: this should have a different code e.g. insufficient matches:
     match->status = pose_estimator::INSUFFICIENT_INLIERS;
-    match->n_registeration_inliers = 0;
+    match->n_registration_inliers = 0;
   }
 
   
 
-  if (match->n_registeration_inliers >= reg_cfg_.min_inliers) {
+  if (match->n_registration_inliers >= reg_cfg_.min_inliers) {
     match->status = pose_estimator::SUCCESS;
   } else {
     match->status = pose_estimator::INSUFFICIENT_INLIERS;
@@ -553,7 +553,7 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
       << delta_quat.x() << " "
       << delta_quat.y() << " "
       << delta_quat.z() << " | inliers: "
-      << match->n_registeration_inliers << "\n";
+      << match->n_registration_inliers << "\n";
   }
 
   if (reg_cfg_.publish_diagnostics || reg_cfg_.use_cv_show){
@@ -591,7 +591,7 @@ void Registeration::align_images(cv::Mat &img0, cv::Mat &img1,
 // Get the ordered list of file names in the directory
 // looking for files ending 'feat'
 // TODO: should this be moved to image_database.cpp?
-void Registeration::getFilenames(std::string path_to_folder, std::vector<std::string> &futimes, 
+void VisLoopClosure::getFilenames(std::string path_to_folder, std::vector<std::string> &futimes, 
     std::vector<std::string> &utimes_strings){
   std::cout << "Reading files from " << path_to_folder << "\n";
   

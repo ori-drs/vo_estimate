@@ -5,7 +5,7 @@
 // matching: finds inlier matches and then estimate the transformation between the images
 //
 // match 0050 from snippet 3 to all the images in snippet_2
-// drc-registeration-batch  -P husky/robot.cfg   -f snippet_2/  -r snippet_3/0050_1465298302290122
+// drc-vis-loop-closure-batch  -P husky/robot.cfg   -f snippet_2/  -r snippet_3/0050_1465298302290122
 // Result: matches to images 43, 49, 50, 51 in snipper 2
 //
 //
@@ -14,7 +14,7 @@
 #include <dirent.h>
 #include <algorithm> // std::sort, std::copy
 
-#include "registeration/registeration.hpp"
+#include "drcvision/vis-loop-closure.hpp"
 #include <ConciseArgs>
 #include <path_util/path_util.h>
 
@@ -22,17 +22,17 @@ using namespace std;
 
 class RegApp{
   public:
-    RegApp(boost::shared_ptr<lcm::LCM> &publish_lcm, RegisterationConfig reg_cfg);
+    RegApp(boost::shared_ptr<lcm::LCM> &publish_lcm, VisLoopClosureConfig reg_cfg);
     
     ~RegApp(){
     }
     
-    void doRegisterationBatch(std::string path_to_folder, std::string ref_filename);
+    void doVisLoopClosureBatch(std::string path_to_folder, std::string ref_filename);
     
   private:
     boost::shared_ptr<lcm::LCM> lcm_;
 
-    Registeration::Ptr reg;
+    VisLoopClosure::Ptr reg;
 };
 
 struct FrameMatchResult{
@@ -45,13 +45,13 @@ struct FrameMatchResult{
 typedef boost::shared_ptr<FrameMatchResult> FrameMatchResultPtr;
 
 
-RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, RegisterationConfig reg_cfg):          
+RegApp::RegApp(boost::shared_ptr<lcm::LCM> &lcm_, VisLoopClosureConfig reg_cfg):          
     lcm_(lcm_){
-  reg = Registeration::Ptr (new Registeration (lcm_, reg_cfg));
+  reg = VisLoopClosure::Ptr (new VisLoopClosure (lcm_, reg_cfg));
 }
   
 
-void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_filename){
+void RegApp::doVisLoopClosureBatch(std::string path_to_folder, std::string ref_filename){
 
   std::vector<string> futimes;
   std::vector<string> utimes_strings;
@@ -125,7 +125,7 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
   for (size_t i=0; i<match_results.size(); i++)
     std::cout << match_results[i]->counter << " "
               << match_results[i]->name << " "
-              << match_results[i]->match->n_registeration_inliers << " "
+              << match_results[i]->match->n_registration_inliers << " "
               << match_results[i]->match->status << "\n";
 
 
@@ -135,13 +135,13 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
   output_filename << fname0 << "_reg_output.txt";
   std::cout << output_filename.str() << " is output filename\n";
   output_file.open(output_filename.str().c_str());
-  output_file << "# no utime n_registeration_inliers status\n";
+  output_file << "# no utime n_registration_inliers status\n";
 
   for (size_t i=0; i<match_results.size(); i++){
     std::string s = match_results[i]->name;
     std::replace( s.begin(), s.end(), '_', ' '); // replace all '_' to ' '
     output_file << s << " "
-                << match_results[i]->match->n_registeration_inliers << " "
+                << match_results[i]->match->n_registration_inliers << " "
                 << match_results[i]->match->status << "\n";
   }
   output_file.flush();
@@ -152,7 +152,7 @@ void RegApp::doRegisterationBatch(std::string path_to_folder, std::string ref_fi
 
 int 
 main( int argc, char** argv ){
-  RegisterationConfig reg_cfg;
+  VisLoopClosureConfig reg_cfg;
   reg_cfg.min_inliers = 60; // 60 used by Hordur, might want to use a higher number
   reg_cfg.verbose = FALSE;
   reg_cfg.publish_diagnostics = FALSE;
@@ -163,7 +163,7 @@ main( int argc, char** argv ){
   string path_to_folder = ".";
   string reference="0050_1465297459081387";
 
-  ConciseArgs parser(argc, argv, "registeration-batch");
+  ConciseArgs parser(argc, argv, "registration-batch");
   parser.add(reg_cfg.min_inliers, "i", "min_inliers", "Min number of inliers");
   parser.add(reg_cfg.verbose, "v", "verbose", "Verbose");
   parser.add(reg_cfg.publish_diagnostics, "d", "publish_diagnostics", "Publish LCM diagnostics");
@@ -187,8 +187,8 @@ main( int argc, char** argv ){
   
   RegApp app(lcm, reg_cfg);
   
-  app.doRegisterationBatch(path_to_folder, reference);
-  cout << "registeration batch is done" << endl << endl;
+  app.doVisLoopClosureBatch(path_to_folder, reference);
+  cout << "registration batch is done" << endl << endl;
 
   return 0;
 }
