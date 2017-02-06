@@ -8,7 +8,7 @@ FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
   int which_vo_options_):
   lcm_(lcm_), kcal_(kcal), draw_lcmgl_(draw_lcmgl_), which_vo_options_(which_vo_options_),
   odom_(kcal_->getLeftRectification(), FoVision::getOptions() ),
-  pose_(Eigen::Isometry3d::Identity())
+  pose_(Eigen::Isometry3d::Identity()), publish_fovis_stats_(false), publish_pose_(false)
 {
 
   fovis::VisualOdometryOptions vo_opts = getOptions();
@@ -21,9 +21,6 @@ FoVision::FoVision(boost::shared_ptr<lcm::LCM> &lcm_,
     bot_lcmgl_t* lcmgl = bot_lcmgl_init(lcm_->getUnderlyingLCM(), "stereo-odometry");
     visualization_ = new Visualization(lcmgl, kcal.get());
   }
-
-  publish_fovis_stats_ = 0;
-  publish_pose_ = 0;
 
 }
 
@@ -211,7 +208,6 @@ void FoVision::fovis_stats(){
 fovis::VisualOdometryOptions FoVision::getOptions()
 {
   fovis::VisualOdometryOptions vo_opts = fovis::VisualOdometry::getDefaultOptions();
-  std::cout << which_vo_options_ << " which_options\n";
 
   if(which_vo_options_ == 0){
     // not commonly used. legacy options
