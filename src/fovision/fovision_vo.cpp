@@ -33,8 +33,6 @@ struct CommandLineConfig
 {
   std::string camera_config; // which block from the cfg to read
   int fusion_mode;
-  bool feature_analysis;
-  int feature_analysis_publish_period; // number of frames between publishing the point features 
   std::string output_extension;
   bool output_signal;
   std::string body_channel;
@@ -42,17 +40,11 @@ struct CommandLineConfig
   std::string vicon_init_channel;
   bool pose_init; // initialize using pose_t
   std::string pose_init_channel;
-
   std::string input_channel;
   bool verbose;
   std::string in_log_fname;
   std::string param_file;
   bool draw_lcmgl;
-  int which_vo_options;
-  bool check_valid_camera_frame;
-
-  int process_skip;
-  int deltaroot_skip;
 };
 
 class StereoOdom{
@@ -98,7 +90,7 @@ class StereoOdom{
 
     int64_t deltaroot_utime_;
     Eigen::Isometry3d deltaroot_body_pose_; // pose of the body when the reference frames changed
-    int deltaroot_counter_;
+    int deltaroot_counter_; // Setting to -1 will reset the deltaroot during the next iteration
     int frame_counter_; // counter of ALL received frames
 
     VoEstimator* estimator_;
@@ -112,13 +104,38 @@ class StereoOdom{
 
     void viconHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::rigid_transform_t* msg);
     void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
+
+    void deltaResetHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::pose_t* msg);
+
     void initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime);
+
+    // Filter the disparity image
+    void filterDisparity(const  bot_core::images_t* msg, int w, int h);
+    // Republish image to LCM. Used to examine the disparity filtering
+    void republishImage(const  bot_core::images_t* msg);
 
     bool pose_initialized_;
     
     Eigen::Isometry3d world_to_camera_;
     Eigen::Isometry3d world_to_body_;
 
+
+    // Image prefiltering
+    bool filter_disparity_;
+    double filter_disparity_below_threshold_;
+    double filter_disparity_above_threshold_;
+    int filter_image_rows_above_;
+    bool publish_filtered_image_;
+
+    // Settings
+    bool publish_feature_analysis_;
+    int feature_analysis_publish_period_; // number of frames between publishing the point features 
+    bool check_valid_camera_frame_;
+
+    int deltaroot_skip_;
+    std::string deltaroot_reset_channel_;
+
+    int process_skip_;
 };    
 
 StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
@@ -137,6 +154,26 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   }
   botframes_ = bot_frames_get_global(lcm_recv_->getUnderlyingLCM(), botparam_);
   botframes_cpp_ = new bot::frames(botframes_);
+
+  // Disparity filtering
+  filter_disparity_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.filter.enabled");
+  std::cout << "Disparity Filter is " << (filter_disparity_ ? "ENABLED" : "DISABLED")  << "\n";
+  filter_disparity_below_threshold_ = bot_param_get_double_or_fail(botparam_, "visual_odometry.filter.filter_disparity_below_threshold");
+  filter_disparity_above_threshold_ = bot_param_get_double_or_fail(botparam_, "visual_odometry.filter.filter_disparity_above_threshold");
+  filter_image_rows_above_ = bot_param_get_int_or_fail(botparam_, "visual_odometry.filter.filter_image_rows_above");
+  publish_filtered_image_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.filter.publish_filtered_image");
+
+  // Feature publishing (debug only)
+  publish_feature_analysis_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.publish_feature_analysis");
+  feature_analysis_publish_period_ = bot_param_get_int_or_fail(botparam_, "visual_odometry.feature_analysis_publish_period");
+
+  check_valid_camera_frame_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.check_valid_camera_frame");
+  process_skip_ = bot_param_get_int_or_fail(botparam_, "visual_odometry.process_skip");
+
+  deltaroot_skip_ = bot_param_get_int_or_fail(botparam_, "visual_odometry.deltaroot_skip");
+  char * deltaroot_reset_channel_char = bot_param_get_str_or_fail(botparam_, "visual_odometry.deltaroot_reset_channel");
+  deltaroot_reset_channel_ = std::string(deltaroot_reset_channel_char);
+  free(deltaroot_reset_channel_char);
 
 
   pc_vis_ = new pronto_vis( lcm_pub_->getUnderlyingLCM() );
@@ -164,12 +201,13 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   decompress_disparity_buf_ = (uint8_t*) malloc( 4*image_size_*sizeof(uint8_t));  // arbitary size chosen..
   
 
-  vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, cl_cfg_.which_vo_options);
+  int which_vo_options = bot_param_get_int_or_fail(botparam_, "visual_odometry.which_vo_options");
+  vo_ = new FoVision(lcm_pub_ , stereo_calibration_, cl_cfg_.draw_lcmgl, which_vo_options);
+  vo_->setPublishFovisStats(publish_feature_analysis_);
   features_ = new VoFeatures(lcm_pub_, stereo_calibration_->getWidth(), stereo_calibration_->getHeight() );
   estimator_ = new VoEstimator(lcm_pub_ , botframes_, cl_cfg_.output_extension, cl_cfg_.camera_config );
   lcm_recv_->subscribe( cl_cfg_.input_channel,&StereoOdom::multisenseHandler,this);
 
- 
   pose_initialized_ = false;
   if (cl_cfg_.vicon_init){
     std::cout << "Will Init internal est using "  << cl_cfg_.vicon_init_channel << " message [vicon/rigid_trans]\n";
@@ -204,9 +242,13 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     pose_initialized_ = true;
   }
   
+  lcm_recv_->subscribe( deltaroot_reset_channel_ ,&StereoOdom::deltaResetHandler,this);
   deltaroot_counter_ = 0;
+
   frame_counter_ = 0;
   imgutils_ = new image_io_utils( lcm_pub_, stereo_calibration_->getWidth(), 2*stereo_calibration_->getHeight()); // extra space for stereo tasks
+
+
   cout <<"StereoOdom Constructed\n";
 }
 
@@ -215,7 +257,7 @@ int counter =0;
 void StereoOdom::featureAnalysis(){
 
   /// Incremental Feature Output:
-  if (counter% cl_cfg_.feature_analysis_publish_period  == 0 ){
+  if (counter% feature_analysis_publish_period_  == 0 ){
     features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , utime_cur_);
     features_->setCurrentImage(left_buf_);
     //features_->setCurrentImages(left_buf_, right_buf_);
@@ -234,7 +276,9 @@ void StereoOdom::featureAnalysis(){
     if (ref_utime_ > 0){ // skip the first null image
       if(vo_->getNumMatches() > 200){ // if less than 50 features - dont bother writing
       // was:      if(featuresA.size() > 50){ // if less than 50 features - dont bother writing
-        cout << "ref frame from " << utime_prev_ << " at " << utime_cur_ <<  " with " <<vo_->getNumMatches()<<" matches\n";
+        std::cout.precision(17);
+        cout << "VO keyframe changed from " << utime_prev_*1E-6 << " at " << utime_cur_*1E-6 <<  " with " <<vo_->getNumMatches()<<" matches\n";
+        std::cout.precision(6);
         features_->setFeatures(vo_->getMatches(), vo_->getNumMatches() , ref_utime_);
         features_->setReferenceImage(left_buf_ref_);
         features_->setReferenceCameraPose( ref_camera_pose_ );
@@ -308,10 +352,14 @@ Eigen::Isometry3d Isometry_invert_and_compose(Eigen::Isometry3d curr, Eigen::Iso
 
 
 void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
+
+  // 0. Reset the deltaroot. This can happen either after a set number of frames
+  // or after a failure of the VO algorithm
   deltaroot_counter_++;
-  if(deltaroot_counter_%cl_cfg_.deltaroot_skip == 0){
-    std::cout << "ref frame from " << deltaroot_utime_ << " to " << utime_cur_  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
-    //std::cout << "new ref body body\n";
+  if(deltaroot_counter_%deltaroot_skip_ == 0){
+    std::cout.precision(17);
+    std::cout << "Delta root frame changed from " << (deltaroot_utime_*1E-6) << " to " << (utime_cur_*1E-6)  << " " << (utime_cur_-deltaroot_utime_)*1E-6 << "sec\n";
+    std::cout.precision(6);
     deltaroot_utime_ = utime_cur_;
     deltaroot_body_pose_ = world_to_body_;
   }
@@ -338,7 +386,6 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
   //Eigen::Isometry3d delta_body_from_ref =  world_to_body_ * ( deltaroot_body_pose_.inverse() );
   Eigen::Isometry3d delta_body_from_ref = Isometry_invert_and_compose(world_to_body_, deltaroot_body_pose_);
 
-
   // 4. Output some signals
   if (cl_cfg_.output_signal ){
     Eigen::Isometry3d vel_body = pronto::getDeltaAsVelocity(delta_body, (utime-prev_utime) );
@@ -347,15 +394,21 @@ void StereoOdom::updateMotion(int64_t utime, int64_t prev_utime){
     estimator_->publishPose(utime, cl_cfg_.body_channel, world_to_body_, vel_body.translation(), Eigen::Vector3d::Zero());
   }
 
-  // 5a. output the per-frame delta:
+  // 4a. Exist of the most recent VO frame was a failure.
+  if (delta_status != fovis::SUCCESS){
+    std::cout << "Not sending delta travelled, resetting deltaroot\n";
+    deltaroot_counter_ = -1; // Setting to -1 will reset the deltaroot during the next iteration
+    return;
+  }
+
   // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
+  // 5a. output the per-frame delta:
   vo_->send_delta_translation_msg(delta_body,
           delta_camera_cov, "VO_DELTA_BODY" );  
-
-  // 5b. output the per-keyframe delta:
-  // THIS IS NOT THE CORRECT COVARIANCE - ITS THE COVARIANCE IN THE CAMERA FRAME!!!!
+  // 5b. output the per-keyframe delta for the last period
   fovis::update_t update_msg = vo_->get_delta_translation_msg(delta_body_from_ref, delta_camera_cov, utime, deltaroot_utime_);
   lcm_pub_->publish("VO_DELTA_BODY_SINCE_REF", &update_msg);
+
 
   if (1==0){
     Isometry3dTime deltaroot_body_poseT = Isometry3dTime(deltaroot_utime_, deltaroot_body_pose_);
@@ -390,7 +443,7 @@ int pixel_convert_8u_rgb_to_8u_gray (uint8_t *dest, int dstride, int width,
 void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
   frame_counter_++;
-  if (frame_counter_% cl_cfg_.process_skip  != 0){
+  if (frame_counter_% process_skip_  != 0){
     return;
   }
 
@@ -418,7 +471,7 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
   }
   updateMotion(msg->utime, utime_prev_);
 
-  if(cl_cfg_.feature_analysis)
+  if(publish_feature_analysis_)
     featureAnalysis();
 
 }
@@ -450,7 +503,7 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
     std::cout << "StereoOdom depth type not understood\n";
     exit(-1);
   }
-  
+
   // Convert Carnegie disparity format into floating point disparity. Store in local buffer
   Mat disparity_orig_temp = Mat::zeros(h,w,CV_16UC1); // h,w
   disparity_orig_temp.data = (uchar*) decompress_disparity_buf_;   // ... is a simple assignment possible?  
@@ -459,8 +512,105 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
   disparity_buf_.resize(h * w);
   cv::Mat_<float> disparity(h, w, &(disparity_buf_[0]));
   disparity = disparity_orig / 16.0;
-  
+
+
+  if (filter_disparity_){
+    // Filter the data to remove far away depth and the crash bar (from hyq)
+    filterDisparity(msg, w, h);
+  }
+ 
   return;
+}
+
+void StereoOdom::filterDisparity(const  bot_core::images_t* msg, int w, int h){
+  // TODO: measure how long this takes, it can be implemented more efficiently
+
+  for(int v=0; v<h; v++) { // t2b
+    for(int u=0; u<w; u++ ) {  //l2r
+
+      if (v > filter_image_rows_above_){
+        disparity_buf_[w*v + u] = 0;
+        //left_buf_[w*v + u] = 0;
+      }else{
+        float val = disparity_buf_[w*v + u];
+        if (val < filter_disparity_below_threshold_){
+          disparity_buf_[w*v + u] = 0;
+          //left_buf_[w*v + u] = 100;
+        } else if (val > filter_disparity_above_threshold_){
+          disparity_buf_[w*v + u] = 0;
+          //left_buf_[w*v + u] = 100;
+        }
+      }
+    }
+  }
+
+  if (publish_filtered_image_)
+    republishImage(msg);
+
+}
+
+
+void StereoOdom::republishImage(const  bot_core::images_t* msg){
+  int width = msg->images[0].width;
+  int height = msg->images[0].height;
+
+  bot_core::image_t msgout_image;
+  msgout_image.utime = msg->utime;
+  msgout_image.width = width;
+  msgout_image.height = height;
+  msgout_image.row_stride = width;
+  msgout_image.size = width*height;
+  msgout_image.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY;
+  msgout_image.data.resize( width*height );
+  memcpy(msgout_image.data.data(), left_buf_, width*height );
+  msgout_image.nmetadata =0;
+  lcm_pub_->publish("CAMERA_LEFT_FILTERED", &msgout_image);
+
+  bot_core::image_t msgout_depth;
+  msgout_depth.utime = msg->utime;
+  msgout_depth.width = width;
+  msgout_depth.height = height;
+  msgout_depth.row_stride = 2*width;
+  msgout_depth.size = 2*width*height;
+  msgout_depth.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY; // false, no info
+  msgout_depth.data.resize( 2*width*height );
+  memcpy(msgout_depth.data.data(), decompress_disparity_buf_, 2*width*height );
+  msgout_depth.nmetadata =0;
+
+  bot_core::images_t msgo;
+  msgo.utime = msg->utime;
+  msgo.n_images = 2;
+  msgo.images.resize(2);
+  msgo.image_types.resize(2);
+  msgo.image_types[0] = bot_core::images_t::LEFT;
+  msgo.image_types[1] = bot_core::images_t::DISPARITY;
+  msgo.images[0] = msg->images[0];
+  msgo.images[1] = msgout_depth;
+  lcm_pub_->publish( "CAMERA_FILTERED" , &msgo);
+
+  /*
+  ofstream myfile;
+  myfile.open ("example.txt");
+  //myfile << "Writing this to a file.\n";
+  for(int v=0; v<h; v++) { // t2b
+    std::stringstream ss;
+    for(int u=0; u<w; u++ ) {  //l2r
+      ss << (float) disparity_buf_[w*v + u] << " ";
+      // cout <<j2 << " " << v << " " << u << " | " <<  points(v,u)[0] << " " <<  points(v,u)[1] << " " <<  points(v,u)[1] << "\n";
+      // std::cout <<  << " " << v << " " << u << "\n";
+    }
+    myfile << ss.str() << "\n";
+  }
+  myfile.close();
+  std::cout << "writing\n";
+  */
+}
+
+
+void StereoOdom::deltaResetHandler(const lcm::ReceiveBuffer* rbuf,
+     const std::string& channel, const  bot_core::pose_t* msg){
+  std::cout << "Got message on channel " << channel << ", will reset deltaroot\n";
+  deltaroot_counter_ = -1; // Setting to -1 will reset the deltaroot during the next iteration
 }
 
 
@@ -521,7 +671,7 @@ static inline bot_core::pose_t getPoseAsBotPose(Eigen::Isometry3d pose, int64_t 
 
 void StereoOdom::initialiseCameraPose(Eigen::Isometry3d world_to_body_init, int64_t utime){
 
-  if (cl_cfg_.check_valid_camera_frame){
+  if (check_valid_camera_frame_){
     // Because body to CAMERA comes through FK, need to get an updated frame (BODY_TO_HEAD)
     int64_t timestamp;
     int status  = bot_frames_get_latest_timestamp(botframes_, 
@@ -597,8 +747,7 @@ int main(int argc, char **argv){
   cl_cfg.input_channel = "MULTISENSE_CAMERA";
   cl_cfg.output_signal = FALSE;
   cl_cfg.body_channel = "POSE_BODY_USING_CAMERA";
-  cl_cfg.feature_analysis = FALSE; 
-  cl_cfg.vicon_init = FALSE;
+    cl_cfg.vicon_init = FALSE;
   cl_cfg.vicon_init_channel = "VICON_pelvis_val";
   cl_cfg.pose_init = FALSE;
   cl_cfg.pose_init_channel = "POSE_BODY_ALT";
@@ -607,20 +756,12 @@ int main(int argc, char **argv){
   cl_cfg.in_log_fname = "";
   std::string param_file = ""; // actual file
   cl_cfg.param_file = ""; // full path to file
-  cl_cfg.feature_analysis_publish_period = 1; // 5
   cl_cfg.draw_lcmgl = FALSE;
-  cl_cfg.which_vo_options = 1;
-  cl_cfg.check_valid_camera_frame = TRUE;
-
-  cl_cfg.process_skip = 1;
-  cl_cfg.deltaroot_skip = 50;
 
   ConciseArgs parser(argc, argv, "fovision-odometry");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: MULTISENSE_CAMERA, stereo, stereo_with_letterbox");
   parser.add(cl_cfg.output_signal, "p", "output_signal", "Output POSE_CAMERA_LEFT_ALT and body estimates");
   parser.add(cl_cfg.body_channel, "b", "body_channel", "body frame estimate (typically POSE_BODY)");
-  parser.add(cl_cfg.feature_analysis, "f", "feature_analysis", "Publish Feature Analysis Data");
-  parser.add(cl_cfg.feature_analysis_publish_period, "fp", "feature_analysis_publish_period", "Publish features with this period");    
   parser.add(cl_cfg.vicon_init, "vi", "vicon_init", "Bootstrap internal estimate using a vicon rigid_transform_t msg");
   parser.add(cl_cfg.vicon_init_channel, "vc", "vicon_init_channel", "If initialising with a rigid_transform_t msg, use this channel");
   parser.add(cl_cfg.pose_init, "pi", "pose_init", "Bootstrap internal estimate using a pose_t message");
@@ -631,10 +772,6 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
-  parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use [1=slow,2=fast]");
-  parser.add(cl_cfg.check_valid_camera_frame, "k", "check_valid_camera_frame", "Check that BODY-to-HEAD has been updated");
-  parser.add(cl_cfg.process_skip, "s", "process_skip", "Number of frames to skip per VO frame processed");
-  parser.add(cl_cfg.deltaroot_skip, "d", "deltaroot_skip", "Number of frames to skip between deltaroot updates");
   parser.parse();
   cout << cl_cfg.fusion_mode << " is fusion_mode\n";
   cout << cl_cfg.camera_config << " is camera_config\n";

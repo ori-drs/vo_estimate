@@ -99,6 +99,7 @@ public:
       return odom_.getPose();
     }
 
+    void setPublishFovisStats(bool publish_fovis_stats_in){ publish_fovis_stats_ = publish_fovis_stats_in; }
 
 private:
     boost::shared_ptr<lcm::LCM> lcm_;
@@ -109,6 +110,8 @@ private:
     fovis::StereoDepth* stereo_depth_; // typical left/right stereo
     fovis::StereoDisparity* stereo_disparity_; // left/disparity from multisense
 
+    bool publish_fovis_stats_;
+    bool publish_pose_;
 
     //fovis::PrimeSenseDepth depth_producer_; // disparity from Freenect
     //fovis::DepthImage* depth_image_; // depth from OpenNI
