@@ -113,6 +113,10 @@ class StereoOdom{
     Eigen::Vector3d camera_linear_velocity_from_imu_; // in camera frame
     Eigen::Vector3d camera_angular_velocity_from_imu_; // in camera frame
     Eigen::Vector3d camera_angular_velocity_from_imu_alpha_; // in camera frame
+
+    // Most recent IMU-derived body orientation
+    Eigen::Quaterniond local_to_body_orientation_from_imu_;
+
 };    
 
 StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
@@ -300,6 +304,7 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
 
   if (!pose_initialized_){
+    fuseInterial(local_to_body_orientation_from_imu_, msg->utime);
     return;
   }
 
@@ -345,6 +350,9 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
                     << current_rpy[0] << " " << current_rpy[1] << " " << current_rpy[2] << "\n";
     fovision_output_file_.flush();
   }
+
+  fuseInterial(local_to_body_orientation_from_imu_, msg->utime);
+
 
 }
 
@@ -522,15 +530,13 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
           rpy[0]*180/M_PI << " " << rpy[1]*180/M_PI << " " << rpy[2]*180/M_PI << "\n";        
       }
       estimator_->setBodyPose(revised_local_to_body);
-
-      // Publish the Position of the floating head:
-      estimator_->publishUpdate(utime, revised_local_to_body, cl_cfg_.output_signal, false);
-
-
-
     }
     if (imu_counter_ > cl_cfg_.correction_frequency) { imu_counter_ =0; }
     imu_counter_++;
+
+    // Publish the Position of the floating head:
+    estimator_->publishUpdate(utime_cur_, estimator_->getBodyPose(), cl_cfg_.output_signal, false);
+
   }
 }
 
@@ -544,9 +550,7 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
     temp_counter=0;
   }
 
-  Eigen::Quaterniond local_to_body_orientation_from_imu;
-  local_to_body_orientation_from_imu = imuOrientationToRobotOrientation(msg);
-  fuseInterial(local_to_body_orientation_from_imu, msg->utime);
+  local_to_body_orientation_from_imu_ = imuOrientationToRobotOrientation(msg);
 
   // Transform rotation Rates into body frame:
   double camera_ang_vel_from_imu_[3];
