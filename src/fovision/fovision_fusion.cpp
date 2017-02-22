@@ -113,6 +113,22 @@ class StereoOdom{
     Eigen::Vector3d camera_linear_velocity_from_imu_; // in camera frame
     Eigen::Vector3d camera_angular_velocity_from_imu_; // in camera frame
     Eigen::Vector3d camera_angular_velocity_from_imu_alpha_; // in camera frame
+
+    // Most recent IMU-derived body orientation
+    Eigen::Quaterniond local_to_body_orientation_from_imu_;
+
+    // Filter the disparity image
+    void filterDisparity(const  bot_core::images_t* msg, int w, int h);
+    // Republish image to LCM. Used to examine the disparity filtering
+    void republishImage(const  bot_core::images_t* msg);
+
+    // Image prefiltering
+    bool filter_disparity_;
+    double filter_disparity_below_threshold_;
+    double filter_disparity_above_threshold_;
+    int filter_image_rows_above_;
+    bool publish_filtered_image_;
+
 };    
 
 StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_) : 
@@ -136,6 +152,14 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   config_ = new voconfig::KmclConfiguration(botparam_, cl_cfg_.camera_config);
   boost::shared_ptr<fovis::StereoCalibration> stereo_calibration_;
   stereo_calibration_ = boost::shared_ptr<fovis::StereoCalibration>(config_->load_stereo_calibration());
+
+  // Disparity filtering
+  filter_disparity_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.filter.enabled");
+  std::cout << "Disparity Filter is " << (filter_disparity_ ? "ENABLED" : "DISABLED")  << "\n";
+  filter_disparity_below_threshold_ = bot_param_get_double_or_fail(botparam_, "visual_odometry.filter.filter_disparity_below_threshold");
+  filter_disparity_above_threshold_ = bot_param_get_double_or_fail(botparam_, "visual_odometry.filter.filter_disparity_above_threshold");
+  filter_image_rows_above_ = bot_param_get_int_or_fail(botparam_, "visual_odometry.filter.filter_image_rows_above");
+  publish_filtered_image_ = bot_param_get_boolean_or_fail(botparam_, "visual_odometry.filter.publish_filtered_image");
 
   // Allocate various buffers:
   image_size_ = stereo_calibration_->getWidth() * stereo_calibration_->getHeight();
@@ -300,6 +324,7 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
 
   if (!pose_initialized_){
+    fuseInterial(local_to_body_orientation_from_imu_, msg->utime);
     return;
   }
 
@@ -346,6 +371,9 @@ void StereoOdom::multisenseHandler(const lcm::ReceiveBuffer* rbuf,
     fovision_output_file_.flush();
   }
 
+  fuseInterial(local_to_body_orientation_from_imu_, msg->utime);
+
+
 }
 
 
@@ -385,9 +413,94 @@ void StereoOdom::multisenseLDHandler(const lcm::ReceiveBuffer* rbuf,
   cv::Mat_<float> disparity(h, w, &(disparity_buf_[0]));
   disparity = disparity_orig / 16.0;
 
+  if (filter_disparity_){
+    // Filter the data to remove far away depth and the crash bar (from hyq)
+    filterDisparity(msg, w, h);
+  }
+
   return;
 }
 
+void StereoOdom::filterDisparity(const  bot_core::images_t* msg, int w, int h){
+  // TODO: measure how long this takes, it can be implemented more efficiently
+
+  for(int v=0; v<h; v++) { // t2b
+    for(int u=0; u<w; u++ ) {  //l2r
+
+      if (v > filter_image_rows_above_){
+        disparity_buf_[w*v + u] = 0;
+        left_buf_[w*v + u] = 0;
+      }else{
+        float val = disparity_buf_[w*v + u];
+        if (val < filter_disparity_below_threshold_ || val > filter_disparity_above_threshold_){
+          disparity_buf_[w*v + u] = 0;
+          left_buf_[w*v + u] = 100;
+        }
+      }
+    }
+  }
+
+  if (publish_filtered_image_)
+    republishImage(msg);
+
+}
+
+
+void StereoOdom::republishImage(const  bot_core::images_t* msg){
+  int width = msg->images[0].width;
+  int height = msg->images[0].height;
+
+  bot_core::image_t msgout_image;
+  msgout_image.utime = msg->utime;
+  msgout_image.width = width;
+  msgout_image.height = height;
+  msgout_image.row_stride = width;
+  msgout_image.size = width*height;
+  msgout_image.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY;
+  msgout_image.data.resize( width*height );
+  memcpy(msgout_image.data.data(), left_buf_, width*height );
+  msgout_image.nmetadata =0;
+  lcm_pub_->publish("MULTISENSE_CAMERA_LEFT_FILTERED", &msgout_image);
+
+  bot_core::image_t msgout_depth;
+  msgout_depth.utime = msg->utime;
+  msgout_depth.width = width;
+  msgout_depth.height = height;
+  msgout_depth.row_stride = 2*width;
+  msgout_depth.size = 2*width*height;
+  msgout_depth.pixelformat = bot_core::image_t::PIXEL_FORMAT_GRAY; // false, no info
+  msgout_depth.data.resize( 2*width*height );
+  memcpy(msgout_depth.data.data(), decompress_disparity_buf_, 2*width*height );
+  msgout_depth.nmetadata =0;
+
+  bot_core::images_t msgo;
+  msgo.utime = msg->utime;
+  msgo.n_images = 2;
+  msgo.images.resize(2);
+  msgo.image_types.resize(2);
+  msgo.image_types[0] = bot_core::images_t::LEFT;
+  msgo.image_types[1] = bot_core::images_t::DISPARITY;
+  msgo.images[0] = msgout_image;
+  msgo.images[1] = msgout_depth;
+  lcm_pub_->publish( "MULTISENSE_CAMERA_FILTERED" , &msgo);
+
+  /*
+  ofstream myfile;
+  myfile.open ("example.txt");
+  //myfile << "Writing this to a file.\n";
+  for(int v=0; v<h; v++) { // t2b
+    std::stringstream ss;
+    for(int u=0; u<w; u++ ) {  //l2r
+      ss << (float) disparity_buf_[w*v + u] << " ";
+      // cout <<j2 << " " << v << " " << u << " | " <<  points(v,u)[0] << " " <<  points(v,u)[1] << " " <<  points(v,u)[1] << "\n";
+      // std::cout <<  << " " << v << " " << u << "\n";
+    }
+    myfile << ss.str() << "\n";
+  }
+  myfile.close();
+  std::cout << "writing\n";
+  */
+}
 
 void StereoOdom::multisenseLRHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::images_t* msg){
@@ -522,15 +635,13 @@ void StereoOdom::fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_
           rpy[0]*180/M_PI << " " << rpy[1]*180/M_PI << " " << rpy[2]*180/M_PI << "\n";        
       }
       estimator_->setBodyPose(revised_local_to_body);
-
-      // Publish the Position of the floating head:
-      estimator_->publishUpdate(utime, revised_local_to_body, cl_cfg_.output_signal, false);
-
-
-
     }
     if (imu_counter_ > cl_cfg_.correction_frequency) { imu_counter_ =0; }
     imu_counter_++;
+
+    // Publish the Position of the floating head:
+    estimator_->publishUpdate(utime_cur_, estimator_->getBodyPose(), cl_cfg_.output_signal, false);
+
   }
 }
 
@@ -544,9 +655,7 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
     temp_counter=0;
   }
 
-  Eigen::Quaterniond local_to_body_orientation_from_imu;
-  local_to_body_orientation_from_imu = imuOrientationToRobotOrientation(msg);
-  fuseInterial(local_to_body_orientation_from_imu, msg->utime);
+  local_to_body_orientation_from_imu_ = imuOrientationToRobotOrientation(msg);
 
   // Transform rotation Rates into body frame:
   double camera_ang_vel_from_imu_[3];
