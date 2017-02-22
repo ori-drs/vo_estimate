@@ -429,12 +429,12 @@ void StereoOdom::filterDisparity(const  bot_core::images_t* msg, int w, int h){
 
       if (v > filter_image_rows_above_){
         disparity_buf_[w*v + u] = 0;
-        //left_buf_[w*v + u] = 0;
+        left_buf_[w*v + u] = 0;
       }else{
         float val = disparity_buf_[w*v + u];
         if (val < filter_disparity_below_threshold_ || val > filter_disparity_above_threshold_){
           disparity_buf_[w*v + u] = 0;
-          //left_buf_[w*v + u] = 100;
+          left_buf_[w*v + u] = 100;
         }
       }
     }
