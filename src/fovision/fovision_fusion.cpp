@@ -460,7 +460,7 @@ void StereoOdom::republishImage(const  bot_core::images_t* msg){
   msgout_image.data.resize( width*height );
   memcpy(msgout_image.data.data(), left_buf_, width*height );
   msgout_image.nmetadata =0;
-  lcm_pub_->publish("CAMERA_LEFT_FILTERED", &msgout_image);
+  lcm_pub_->publish("MULTISENSE_CAMERA_LEFT_FILTERED", &msgout_image);
 
   bot_core::image_t msgout_depth;
   msgout_depth.utime = msg->utime;
@@ -480,9 +480,9 @@ void StereoOdom::republishImage(const  bot_core::images_t* msg){
   msgo.image_types.resize(2);
   msgo.image_types[0] = bot_core::images_t::LEFT;
   msgo.image_types[1] = bot_core::images_t::DISPARITY;
-  msgo.images[0] = msg->images[0];
+  msgo.images[0] = msgout_image;
   msgo.images[1] = msgout_depth;
-  lcm_pub_->publish( "CAMERA_FILTERED" , &msgo);
+  lcm_pub_->publish( "MULTISENSE_CAMERA_FILTERED" , &msgo);
 
   /*
   ofstream myfile;
