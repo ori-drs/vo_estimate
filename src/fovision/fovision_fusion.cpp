@@ -696,7 +696,7 @@ int main(int argc, char **argv){
   cl_cfg.draw_lcmgl = FALSE;  
   double processing_rate = 1; // real time
   cl_cfg.write_feature_output = FALSE;
-  cl_cfg.which_vo_options = 1;
+  cl_cfg.which_vo_options = 2;
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.camera_config, "c", "camera_config", "Camera Config block to use: CAMERA, stereo, stereo_with_letterbox");
@@ -714,7 +714,7 @@ int main(int argc, char **argv){
   parser.add(cl_cfg.in_log_fname, "L", "in_log_fname", "Process this log file");
   parser.add(param_file, "P", "param_file", "Pull params from this file instead of LCM");
   parser.add(cl_cfg.draw_lcmgl, "g", "lcmgl", "Draw LCMGL visualization of features");
-  parser.add(processing_rate, "pr", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
+  parser.add(processing_rate, "r", "processing_rate", "Processing Rate from a log [0=ASAP, 1=realtime]");  
   parser.add(cl_cfg.write_feature_output, "fo", "write_feature_output", "Write feature poses, images to file");
   parser.add(cl_cfg.which_vo_options, "n", "which_vo_options", "Which set of VO options to use [1=slow,2=fast]");
   parser.parse();

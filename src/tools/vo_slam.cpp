@@ -1,38 +1,3 @@
-// Filter Chain to process Georges Square Husky Dataset (from 2016 06 07)
-// and to optimize the results with iSAM
-//
-// Filter Chain 1 - From LCM input ===========================================
-//
-// 1. Generate a Motion Trajectory using Visual Odometry (with IMU to constrain gravity drift):
-// se-simple-fusion -P husky/robot.cfg  -m 3   -p POSE_BODY_ON_IMU -L ~/logs/husky/2016-06-07-outdoor-experiment-with-MS-and-sick/lcmlog-2016-06-07.00-camera-10fps-three-loops-only -pr 0  
-// ... interested in the pose of the camera at each iteration at 10Hz (not the 100Hz IMU version)
-//
-// 2. Run this process to output the input constraints that isam needs (i.e. relative odometry)
-// in this case a downsampled trajectory in 3D.
-// se-vo-slam -L input_odometry.lcmlog -pr 0 -o 10
-// It is also possible to process in 3D without down sampling:
-// se-vo-slam -L input_odometry.lcmlog -pr 0
-//
-// 2b. The ever so subtle next step is to append to that trajectory some loop closure edges. Six were sufficient for this experiment
-//
-// 3. The iSAM executable can process the output text file husky_isam_trajectory.txt to produce a smoothed trajectory
-// The following works well for a very large 1200 trajectory in 2D
-// isam -L husky_isam_trajectory.txt  -W output.txt
-// The following works well for a very large 12,000 trajectory
-// isam -L husky_isam_trajectory.txt  -d 100 -u 100 -W output.txt
-// (the result is published to LCM collections)
-//
-//
-// Filter Chain 2 - From text input ===========================================  
-// 
-// 1. Use vo (as above) to write an pose_trajectory.txt of this format:
-// utime x y z qw qx qy qz roll pitch yaw
-//
-// 2. Read the text file using the mode implemented below (but commented out)
-// This will output the same files as #2 above
-// 
-// 3. Use iSAM as in #3 above
-
 #include <string>
 #include <iostream>
 #include <fstream>
