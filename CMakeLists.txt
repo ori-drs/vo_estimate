@@ -30,3 +30,10 @@ include(CTest)
 set(test_data_dir ${CMAKE_SOURCE_DIR}/../../../../drc-testing-data)  # using ~/ probably won't work, instead define it relative to the project dir
 add_test(NAME test_testSimpleVo
                COMMAND se-simple-vo -L ${test_data_dir}/state_est/run1_field_camera_snippet.lcmlog -P atlas/robot.cfg -p)
+
+
+# Unit Testing
+#include(CTest)
+#set(test_data_dir ${CMAKE_SOURCE_DIR}/../../../../drc-testing-data)  # using ~/ probably won't work, instead define it relative to the project dir
+add_test(NAME test_testSimpleIsamDemo
+               COMMAND se-simple-isam-demo)
