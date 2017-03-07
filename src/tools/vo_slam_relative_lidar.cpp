@@ -39,6 +39,7 @@
 
 #include <lcm/lcm-cpp.hpp>
 #include <lcmtypes/bot_core.hpp>
+#include <lcmtypes/visualization.h> // VS_OBJECT_COLLECTION_T_AXIS3D
 
 #include <pronto_utils/pronto_vis.hpp> // visualize pt clds
 #include <pronto_utils/pronto_conversions_lcm.hpp>
@@ -64,6 +65,9 @@ struct CommandLineConfig
 
 std::ofstream isam_trajectory;
 std::ofstream world_trajectory;
+
+const int PCOFFSETID = 1000000;
+const uint8_t RESET = 1;
 
 class App{
   public:
@@ -156,7 +160,7 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
 
   // Mode for Filter Chain 2 mode
   
-  pc_vis_ = new pronto_vis( lcm_recv_->getUnderlyingLCM() ); // 4 triangle, 5 triad
+  pc_vis_ = new pronto_vis( lcm_pub_->getUnderlyingLCM() ); // 4 triangle, 5 triad
   /*
   pc_vis_->obj_cfg_list.push_back( obj_cfg(4004,"Pose Trajectory",5,1) );
   std::string database_path = "/home/mfallon/logs/husky/2016-07-georges-square-west/";
@@ -328,44 +332,36 @@ void App::convertPoseToIsam(Isometry3dTime currentPoseT){
     // transform the point cloud with the inverse of the transformation b/w world and the current pose
     pcl::transformPointCloud (*cloud_xyzrgb, *transformed_cloud, T_world_curr_pose.inverse());
 
+    pronto::PointCloud* transformed_cloud_pronto (new pronto::PointCloud);
+    pc_vis_->convertCloudPclToPronto(*transformed_cloud,*transformed_cloud_pronto);
+
     transformed_cloud->width = 1;
     transformed_cloud->height = transformed_cloud->points.size();
-
-    /*
-    std::cout << "Viewing cloud:" << std::endl;
-    // Visualization
-    std::cout << "Point cloud colours: white - orig, red - transformed" << std::endl;
-    pcl::visualization::PCLVisualizer viewer ("Matrix transformation example");
-    
-     // Define R,G,B colors for the point cloud
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> source_cloud_color_handler (cloud_xyzrgb, 255, 255, 255);
-    // We add the point cloud to the viewer and pass the color handler
-    viewer.addPointCloud (cloud_xyzrgb, source_cloud_color_handler, "original_cloud");
-    
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> transformed_cloud_color_handler (transformed_cloud, 230, 20, 20); // Red
-    viewer.addPointCloud (transformed_cloud, transformed_cloud_color_handler, "transformed_cloud");
-    
-    viewer.addCoordinateSystem (1.0, 0);
-    viewer.setBackgroundColor(0.05, 0.05, 0.05, 0); // Setting background to a dark grey
-    
-    viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "original_cloud");
-    viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "transformed_cloud");
-    //viewer.setPosition(800, 400); // Setting visualiser window position
-
-    while (!viewer.wasStopped ()) { // Display the visualiser until 'q' key is pressed
-      viewer.spinOnce ();
-    }
-    */
 
     // save the transformed point cloud
     std::stringstream ss;
     ss << dirname_ << (isam_counter_-1) << ".pcd";
     writer_.write<pcl::PointXYZRGB> (ss.str (), *transformed_cloud, false);
+
+    
+    // visualization
+    // id, name, visualise as, reset
+    std::stringstream ss_pose_name;
+    ss_pose_name << "Pose " << (isam_counter_-1);
+    obj_cfg ocfg = obj_cfg((isam_counter_-1), ss_pose_name.str(), VS_OBJECT_COLLECTION_T_AXIS3D, RESET);
+    pc_vis_->pose_to_lcm(ocfg,currentPoseT);
+
+    
+    // id, name, visualsie as, reset, frame_id, (-1 - automatically asign, 0 - no color, 1 - use the rgb param), rgb
+    std::stringstream ss_cl_name;
+    ss_cl_name << "Cloud " << PCOFFSETID+(isam_counter_-1);
+    ptcld_cfg pconfig = ptcld_cfg(PCOFFSETID+(isam_counter_-1),  ss_cl_name.str(),1,RESET, (isam_counter_-1),1,{0.2,0.2,0.2} );
+    // 0
+    pc_vis_->ptcld_to_lcm(pconfig, *transformed_cloud_pronto, currentPoseT.utime, currentPoseT.utime);
     
     // empty the accumulator
     accu_->clearCloud();
   }
-
 
   previousPoseT_ = currentPoseT;
 }
