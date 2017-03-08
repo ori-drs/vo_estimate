@@ -61,7 +61,7 @@ private:
   Eigen::Isometry3d local_to_body_;
   
   Eigen::Isometry3d local_to_body_prev_;
-  Eigen::Isometry3d delta_head_prev_;
+  Eigen::Isometry3d delta_body_prev_;
   
   // Cache of rates: All are stored as RPY
   Eigen::Vector3d head_rot_rate_, head_lin_rate_;

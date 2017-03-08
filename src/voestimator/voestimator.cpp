@@ -6,9 +6,6 @@ VoEstimator::VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes
   pose_initialized_(false), vo_initialized_(false){
   local_to_body_.setIdentity();
 
-  // Assume head to camera is rigid:
-  // TODO: remove bot frames dependency by providing this transform in constructor:
-  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", std::string(camera_config_ + "_LEFT").c_str(), 0, camera_to_body_);
   
   // Vis Config:
   pc_vis_ = new pronto_vis( lcm_->getUnderlyingLCM() );
@@ -18,9 +15,12 @@ VoEstimator::VoEstimator(boost::shared_ptr<lcm::LCM> &lcm_, BotFrames* botframes
 
 void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isometry3d delta_camera){
 
+  // 0. Assume head to camera is rigid:
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", std::string(camera_config_ + "_LEFT").c_str(), utime, camera_to_body_);
+
   // 1. Update the Position of the head frame:
-  Eigen::Isometry3d delta_head = camera_to_body_.inverse()*delta_camera*camera_to_body_;
-  local_to_body_ = local_to_body_*delta_head;
+  Eigen::Isometry3d delta_body = camera_to_body_.inverse()*delta_camera*camera_to_body_;
+  local_to_body_ = local_to_body_*delta_body;
 
   // 2. Evaluate Rates:
   double delta_time =  ( (double) utime - utime_prev)/1E6;
@@ -30,11 +30,11 @@ void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isome
   }else{
     vo_initialized_ = true;
     
-    //Eigen::Isometry3d delta_head =  local_to_body_prev_.inverse() * local_to_body_;
-    head_lin_rate_ = delta_head.translation()/delta_time;
-    Eigen::Vector3d delta_head_rpy;
-    quat_to_euler(  Eigen::Quaterniond(delta_head.rotation()) , delta_head_rpy(0), delta_head_rpy(1), delta_head_rpy(2));
-    head_rot_rate_ = delta_head_rpy/delta_time; // rotation rate
+    //Eigen::Isometry3d delta_body =  local_to_body_prev_.inverse() * local_to_body_;
+    head_lin_rate_ = delta_body.translation()/delta_time;
+    Eigen::Vector3d delta_body_rpy;
+    quat_to_euler(  Eigen::Quaterniond(delta_body.rotation()) , delta_body_rpy(0), delta_body_rpy(1), delta_body_rpy(2));
+    head_rot_rate_ = delta_body_rpy/delta_time; // rotation rate
   }    
   
   // 3. Maintain a smoothed version:
@@ -45,7 +45,7 @@ void VoEstimator::updatePosition(int64_t utime, int64_t utime_prev, Eigen::Isome
   // 4. Output the head position update, at the rates provided by VO
   publishUpdate(utime_prev, local_to_body_, "POSE_HEAD_ALT_FOVIS", true);
   local_to_body_prev_ = local_to_body_;
-  delta_head_prev_ = delta_head;
+  delta_body_prev_ = delta_body;
 }
   
 void VoEstimator::publishUpdate(int64_t utime,
