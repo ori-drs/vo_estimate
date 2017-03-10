@@ -25,7 +25,7 @@ void sendCollection(vector < Pose2d_Node* > nodes,int id,string label)
     mystr=oss.str();	  
 
     objs.name = (char*) label.c_str();
-    objs.type = VS_OBJECT_COLLECTION_T_POSE;
+    objs.type = VS_OBJECT_COLLECTION_T_POSE3D;
     objs.reset = false;
     objs.nobjects = n;
     vs_object_t poses[n];
