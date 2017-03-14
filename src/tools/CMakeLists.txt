@@ -20,5 +20,5 @@ pods_install_executables(se-simple-isam-demo)
 add_executable(se-isam-lidar isam_read_file_lidar.cpp)
 pods_use_pkg_config_packages(se-isam-lidar
     pronto_vis pronto_math  eigen3 )
-target_link_libraries (se-isam-lidar isam cholmod  )
+target_link_libraries (se-isam-lidar isam cholmod boost_system )
 pods_install_executables(se-isam-lidar)
