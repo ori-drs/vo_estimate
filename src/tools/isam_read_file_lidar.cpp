@@ -35,9 +35,13 @@ pronto_vis* pc_vis_;
 Slam slam;
 vector < Pose2d_Node* > pg1_nodes;
 vector < pcl::PointCloud<pcl::PointXYZRGB>::Ptr > pcs;
+// all poses before correction
 std::vector<Isometry3dTime> posesT;
+// all poses after correction
+std::vector<Isometry3dTime> posesTupdated;
 const int PCOFFSETID = 1000000;
 const uint8_t RESET = 1;
+pcl::PCDWriter writer_;
 
 // Send a list of poses/objects as OBJECT_COLLECTION
 int obj_coll_id=1;
@@ -83,6 +87,10 @@ void add_cloud(unsigned int idx_x0, const std::string dirname) {
     return;
   }
 
+  
+  // add to a vector of clou
+  pcs.push_back(cloud);
+
   pconfig.reset = 0; // keep previous points
   pc_vis_->ptcld_to_lcm(pconfig, *cloud, idx_x0, idx_x0);
 }
@@ -109,8 +117,6 @@ void add_pose(unsigned int idx_x0) {
 }
 
 void update_poses() {
-  // map backwards all the poses
-  std::vector<Isometry3dTime> posesTupdated;
   for(size_t i = 0u; i < pg1_nodes.size(); ++i) {
     Isometry3dTime poseT = posesT.at(i);
     Pose2d_Node* node = pg1_nodes[i];
@@ -164,8 +170,9 @@ void parse_file(const std::string filename, const std::string dirname) {
         Pose2d measurement(x,y,t);
 
         add_odometry(idx_x0, idx_x1, measurement, SqrtInformation(sqrtinf));
-        if(dirname.compare("") != 0) add_cloud(idx_x0, dirname);
+        // IMPORTANT - first add the pose, then the cloud
         add_pose(idx_x0);
+        if(dirname.compare("") != 0) add_cloud(idx_x0, dirname);
       }
       // update every 500 steps
       if(line_num % 500 == 0) {
@@ -182,6 +189,43 @@ void parse_file(const std::string filename, const std::string dirname) {
 
   else std::cout << "Unable to open file" << std::endl; 
 
+}
+
+void extract_maps(std::vector<int> start, std::vector<int> end) {
+  if(start.size() != end.size()) std::cout << "Invalid loop parameters" << std::endl;
+
+  // for each map loop
+  for(size_t i = 0u; i<start.size(); ++i) {
+    // create a new pointclouds
+    pcl::PointCloud<pcl::PointXYZRGB> cloud;
+    // get the clouds between start[i] and end[i] (they are already transformed, thus accumulate)
+    int duration = end[i] - start[i];
+    std::cout << "Map " << i << " total poses:" << duration << std::endl;
+    // for each pose/cloud
+    for(size_t j = 0u; j<duration;j++) {
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
+      Isometry3dTime currentPoseT = posesTupdated.at(start[i]+j);
+
+      // compute the transformation between the cloud and world(local)
+      Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
+      T_world_curr_pose.translation() << currentPoseT.pose.translation().x(), currentPoseT.pose.translation().y(), currentPoseT.pose.translation().z();
+
+      Eigen::Quaterniond current_quat = Eigen::Quaterniond( currentPoseT.pose.rotation() );
+      T_world_curr_pose.rotate(current_quat);
+
+      // std::cout << "Transform matrix:" << T_world_curr_pose.inverse().matrix() << std::endl;
+      // transform the point cloud with the inverse of the transformation b/w world and the current pose
+      pcl::transformPointCloud (*pcs.at(start[i]+j), *transformed_cloud, T_world_curr_pose);
+
+
+      cloud += *transformed_cloud;
+    }
+
+    // at this point we have a concatinated "cloud"
+    std::stringstream ss;
+    ss << "map_" << i << ".pcd";
+    writer_.write<pcl::PointXYZRGB> (ss.str (), cloud, false);
+  }
 }
 
 
@@ -203,6 +247,20 @@ int main(int argc, char **argv) {
   std::cout << "Starting isam_read_file_lidar" << std::endl;
   
   parse_file(cl_cfg.fname, cl_cfg.cloud_directory);
+
+  // extract pointcloud
+
+  std::vector<int> start;
+  start.push_back(0);
+  start.push_back(8529);
+  start.push_back(16824);
+
+  std::vector<int> end;
+  end.push_back(8532);
+  end.push_back(16797);
+  end.push_back(25152);
+
+  extract_maps(start, end);
 
   std::cout << "Exiting isam_read_file_lidar" << std::endl;
 
