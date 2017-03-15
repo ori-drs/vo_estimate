@@ -25,6 +25,23 @@ using namespace std;
 using namespace isam;
 using namespace Eigen;
 
+struct Odometry {
+  unsigned int id; // the line number
+  std::string name; // always ODOMETRY
+  unsigned int ref; // reference frame
+  unsigned int source; // source frame, sort by this!
+  Pose2d measurement; // x, y, theta
+  Noise cov; // covariance consisting of varx, cov x y, cov x t, var y, cov y t, var t
+
+  // sorting function
+  bool operator < (const Odometry& o) const
+  {
+      return (source < o.source);
+  }
+};
+
+std::vector<Odometry> odometry;
+
 struct CommandLineConfig {
   std::string fname;
   std::string cloud_directory;
@@ -34,38 +51,89 @@ lcm_t* m_lcm;
 pronto_vis* pc_vis_;
 Slam slam;
 vector < Pose2d_Node* > pg1_nodes;
+vector<std::pair<unsigned int, unsigned int>> node_mapping;
 vector < pcl::PointCloud<pcl::PointXYZRGB>::Ptr > pcs;
 // all poses before correction
 std::vector<Isometry3dTime> posesT;
-// all poses after correction
-std::vector<Isometry3dTime> posesTupdated;
-const int PCOFFSETID = 1000000;
-const uint8_t RESET = 1;
 pcl::PCDWriter writer_;
 
 // Send a list of poses/objects as OBJECT_COLLECTION
-int obj_coll_id=1;
+int obj_coll_id=1000000;
 obj_cfg oconfig = obj_cfg(obj_coll_id,   "Poses"  ,5,1);
 
 // Send the collection of point cloud lists
-ptcld_cfg pconfig = ptcld_cfg(2,  "Clouds"     ,1,1, obj_coll_id,0, {0.2,0,0.2} );
+ptcld_cfg pconfig = ptcld_cfg(2000000,  "Clouds"     ,1,1, obj_coll_id,0, {0.2,0,0.2} );
 
-void add_prior() {
-  Pose2d prior_origin(0., 0., 0.);
-  Pose2d_Node* a0 = new Pose2d_Node();
-  slam.add_node(a0);
-  Pose2d_Factor* p_a0 = new Pose2d_Factor(a0, prior_origin, SqrtInformation(100. * eye(3)));
-  slam.add_factor(p_a0);
-  pg1_nodes.push_back(a0);
+
+void sendCollection(vector < Pose2d_Node* > nodes,int id,string label)
+{
+  vs_object_collection_t objs;  
+  size_t n = nodes.size();
+  if (n > 1) {
+    objs.id = id;
+    stringstream oss;
+    string mystr;
+    oss << "coll" << id;
+    mystr=oss.str();    
+
+    objs.name = (char*) label.c_str();
+    objs.type = VS_OBJECT_COLLECTION_T_POSE3D;
+    objs.reset = false;
+    objs.nobjects = n;
+    vs_object_t poses[n];
+    for (size_t i = 0; i < n; i++) {
+      Pose2d_Node* node =  nodes[i];
+      isam::Pose2d  pose;
+      pose = (*node).value();
+
+      // direct Eigen Approach: TODO: test and use
+      //Matrix3f m;
+      //m = AngleAxisf(angle1, Vector3f::UnitZ())
+      // *  * AngleAxisf(angle2, Vector3f::UnitY())
+      // *  * AngleAxisf(angle3, Vector3f::UnitZ());
+      Eigen::Quaterniond quat = euler_to_quat(0,0, pose.t());
+
+      poses[i].id = i;
+      poses[i].x = pose.x();
+      poses[i].y = pose.y() ;
+      poses[i].z = 0;
+      poses[i].qw = quat.w();
+      poses[i].qx = quat.x();
+      poses[i].qy = quat.y();
+      poses[i].qz = quat.z();
+    }
+    objs.objects = poses;
+    vs_object_collection_t_publish(m_lcm, "OBJECT_COLLECTION", &objs);
+  }
+}
+
+// the source is idx_x1
+bool node_exists(unsigned int idx_x1) {
+  for( std::vector<std::pair<unsigned int, unsigned int>>::iterator it = node_mapping.begin(); it != node_mapping.end(); ++it )
+  {
+    unsigned int node_key = it->first;
+    unsigned int source = it->second;
+
+    if(source == idx_x1) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void add_odometry(unsigned int idx_x0, unsigned int idx_x1, const Pose2d& measurement, const Noise& noise) {
   // only add another node, if the current one does not exist
   Pose2d_Node* a1;
-  if(idx_x1 >= pg1_nodes.size()) {
+  // TODO: this might not work, as it assumes that the ids are in consecutive order
+  // check if the current source exists
+  // if(idx_x1 >= pg1_nodes.size()) {
+
+  if(!node_exists(idx_x1)) {
     a1 = new Pose2d_Node();
-    slam.add_node(a1);  
+    slam.add_node(a1);
     pg1_nodes.push_back(a1);
+    node_mapping.push_back(std::make_pair(pg1_nodes.size()-1, idx_x1));
   }
   else {
     a1 = pg1_nodes.at(idx_x1);
@@ -116,37 +184,30 @@ void add_pose(unsigned int idx_x0) {
   pc_vis_->pose_to_lcm(oconfig, poseT);
 }
 
-void update_poses() {
-  for(size_t i = 0u; i < pg1_nodes.size(); ++i) {
-    Isometry3dTime poseT = posesT.at(i);
-    Pose2d_Node* node = pg1_nodes[i];
-    isam::Pose2d pose;
-    pose = (*node).value();
+void add_prior() {
 
-    Eigen::Quaterniond quat = euler_to_quat(0,0, pose.t());
+  Pose2d prior_origin(0., 0., 0.);
+  Pose2d_Node* a0 = new Pose2d_Node();
+  Pose2d_Factor* p_a0 = new Pose2d_Factor(a0, prior_origin, SqrtInformation(100. * eye(3)));
 
-    poseT.pose.translation().x() = pose.x();
-    poseT.pose.translation().y() = pose.y();
-    poseT.pose.translation().z() = 0;
-    poseT.pose.rotate(quat);
 
-    posesTupdated.push_back(poseT);
-  }
+  slam.add_node(a0);
+  slam.add_factor(p_a0);
 
-  oconfig.reset = 1;
-
-  // update all the poses
-  pc_vis_->pose_collection_to_lcm(oconfig, posesTupdated);
-  oconfig.reset = 0;
+  // save the node
+  pg1_nodes.push_back(a0);
+  // associate the node id with the id of the prior (always 0)
+  node_mapping.push_back(std::make_pair(pg1_nodes.size()-1, 0));
+  add_pose(0); // add to LCM
 }
 
-void parse_file(const std::string filename, const std::string dirname) {
+void parse_file(const std::string filename) {
   std::string line;
   std::ifstream isam_trajectories(filename);
 
   if (isam_trajectories.good())
   {
-    int line_num = 1;
+    unsigned int line_num = 1;
     while (std::getline(isam_trajectories,line))
     {
       std::vector<std::string> strs;
@@ -157,11 +218,6 @@ void parse_file(const std::string filename, const std::string dirname) {
         unsigned int idx_x0 = std::stoi(strs.at(1)), idx_x1 = std::stoi(strs.at(2));
         double x = std::stod(strs.at(3)), y = std::stod(strs.at(4)), t = std::stod(strs.at(5)), ixx = std::stod(strs.at(7)), ixy = std::stod(strs.at(8)), ixt = std::stod(strs.at(9)), iyy = std::stod(strs.at(10)), iyt = std::stod(strs.at(11)), itt = std::stod(strs.at(12)); // there's an empty space as a 6th char
 
-        // if it's the first measurement
-        if(idx_x0 == 0) {
-          add_prior();
-        }
-
         MatrixXd sqrtinf(3,3);
         sqrtinf <<
           ixx, ixy, ixt,
@@ -169,21 +225,11 @@ void parse_file(const std::string filename, const std::string dirname) {
           0.,   0., itt;
         Pose2d measurement(x,y,t);
 
-        add_odometry(idx_x0, idx_x1, measurement, SqrtInformation(sqrtinf));
-        // IMPORTANT - first add the pose, then the cloud
-        add_pose(idx_x0);
-        if(dirname.compare("") != 0) add_cloud(idx_x0, dirname);
-      }
-      // update every 500 steps
-      if(line_num % 500 == 0) {
-        slam.update();
+        // add to a vector of odometries
+        odometry.push_back({line_num, "ODOMETRY", idx_x0, idx_x1, measurement, SqrtInformation(sqrtinf)});
       }
       ++line_num;
     }
-    slam.update();
-    slam.batch_optimization();
-    std::cout << "\n";
-    update_poses();
     isam_trajectories.close();
   }
 
@@ -191,7 +237,7 @@ void parse_file(const std::string filename, const std::string dirname) {
 
 }
 
-void extract_maps(std::vector<int> start, std::vector<int> end) {
+void extract_maps(const std::vector<int> start, const std::vector<int> end) {
   if(start.size() != end.size()) std::cout << "Invalid loop parameters" << std::endl;
 
   // for each map loop
@@ -204,7 +250,8 @@ void extract_maps(std::vector<int> start, std::vector<int> end) {
     // for each pose/cloud
     for(size_t j = 0u; j<duration;j++) {
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
-      Isometry3dTime currentPoseT = posesTupdated.at(start[i]+j);
+      // Isometry3dTime currentPoseT = posesTupdated.at(start[i]+j);
+      Isometry3dTime currentPoseT = posesT.at(start[i]+j);
 
       // compute the transformation between the cloud and world(local)
       Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
@@ -228,6 +275,38 @@ void extract_maps(std::vector<int> start, std::vector<int> end) {
   }
 }
 
+void process_odometry(const std::string dirname) {
+
+  // sort the odometry vector by source
+  std::sort(odometry.begin(), odometry.end());
+
+  std::cout << "odometry size: " << odometry.size() << std::endl;
+
+  for (size_t i = 0u; i<odometry.size(); ++i) {
+
+    // std::cout << "processing i: " << i << std::endl;
+    Odometry o = odometry.at(i);
+
+    // if it's the first measurement
+    if(i == 0) {
+      add_prior();
+    }
+
+    add_odometry(o.ref, o.source, o.measurement, o.cov);
+    // IMPORTANT - first add the pose, then the cloud
+    add_pose(o.ref);
+    if(dirname.compare("") != 0) add_cloud(o.ref, dirname);
+
+    slam.update();
+    sendCollection(pg1_nodes, obj_coll_id, "Poses");
+  }
+
+  slam.update();
+  slam.batch_optimization();
+  sendCollection(pg1_nodes, obj_coll_id, "Poses");
+  std::cout << "\n";
+}
+
 
 int main(int argc, char **argv) {
 
@@ -244,12 +323,19 @@ int main(int argc, char **argv) {
   m_lcm = lcm_create(NULL);
   pc_vis_ = new pronto_vis( m_lcm );
 
-  std::cout << "Starting isam_read_file_lidar" << std::endl;
+  std::cout << "[iSAM] Starting isam_read_file_lidar" << std::endl;
   
-  parse_file(cl_cfg.fname, cl_cfg.cloud_directory);
+  parse_file(cl_cfg.fname);
 
-  // extract pointcloud
+  std::cout << "[iSAM] Finished reading file." << std::endl;
+  std::cout << "[iSAM] Processing odometry." << std::endl;
 
+  process_odometry(cl_cfg.cloud_directory);
+
+  std::cout << "[iSAM] Finished processing odometry." << std::endl;
+  std::cout << "[iSAM] Extracting maps." << std::endl;
+
+  // extract pointcloud maps
   std::vector<int> start;
   start.push_back(0);
   start.push_back(8529);
@@ -262,6 +348,7 @@ int main(int argc, char **argv) {
 
   extract_maps(start, end);
 
+  std::cout << "[iSAM] Finished extracting maps." << std::endl;
   std::cout << "Exiting isam_read_file_lidar" << std::endl;
 
   return 0;
