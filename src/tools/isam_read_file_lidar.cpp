@@ -61,10 +61,6 @@ pcl::PCDWriter writer_;
 int obj_coll_id=1000000;
 obj_cfg oconfig = obj_cfg(obj_coll_id,   "Poses"  ,5,1);
 
-// Send the collection of point cloud lists
-ptcld_cfg pconfig = ptcld_cfg(2000000,  "Clouds"     ,1,1, obj_coll_id,0, {0.2,0,0.2} );
-
-
 void sendCollection(vector < Pose2d_Node* > nodes,int id,string label)
 {
   vs_object_collection_t objs;  
@@ -162,6 +158,15 @@ void add_cloud(unsigned int idx_x0, const std::string dirname) {
   
   // add to a vector of clouds
   pcs.push_back(cloud);
+
+  // normalize the utime
+  float utimeN = (float) idx_x0 / (float) odometry.size();
+
+  float rgb[3];
+  jet_rgb(utimeN, rgb);
+
+  // Send the collection of point cloud lists
+  ptcld_cfg pconfig = ptcld_cfg(2000000,  "Clouds"     ,1,1, obj_coll_id,1, {rgb[0], rgb[1], rgb[2]});
 
   pconfig.reset = 0; // keep previous points
   pc_vis_->ptcld_to_lcm(pconfig, *cloud, idx_x0, idx_x0);
