@@ -49,6 +49,9 @@
 #include <boost/filesystem.hpp>
 #include <cloud_accumulate/cloud_accumulate.hpp>
 
+// dift filters
+#include "diftFilters/filtering.hpp"
+
 #include <path_util/path_util.h>
 
 using namespace std;
@@ -61,6 +64,10 @@ struct CommandLineConfig
   bool output_2d;
   std::string lidar_channel;
   bool save_pcs;
+  bool filter_ground_points;
+  float angleLeft;
+  float angleRight;
+  bool filter_range_points;
 };
 
 std::ofstream isam_trajectory;
@@ -68,19 +75,22 @@ std::ofstream world_trajectory;
 
 const int PCOFFSETID = 1000000;
 const uint8_t RESET = 1;
+std::unique_ptr<dift::AbstractFilters> filters;
 
 class App{
   public:
-    App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg);
+    App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg, const FilteringParams& filtering_params);
     
-    ~App(){
-    }
+    ~App(){}
 
   private:
     BotParam* botparam_;
     BotFrames* botframes_;
 
     const CommandLineConfig cl_cfg_;
+
+    // filters
+    const FilteringParams filtering_params_;
 
     // cloud accumulate
     CloudAccumulate* accu_;
@@ -110,9 +120,9 @@ class App{
     std::string dirname_;
 };    
 
-App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg) : 
+App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg, const FilteringParams&filtering_params) : 
        lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), 
-       previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14)
+       previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14), filtering_params_(filtering_params)
 {
   do {
     botparam_ = bot_param_new_from_server(lcm_recv_->getUnderlyingLCM(), 0); // 1 means keep updated, 0 would ignore updates
@@ -122,6 +132,9 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
 
   // init accumulator
   accu_ = new CloudAccumulate(lcm_recv_, ca_cfg_, botparam_, botframes_);
+
+  // init filters
+  filters = std::unique_ptr<dift::AbstractFilters>(new dift::AbstractFilters(filtering_params_));
 
   // Populate buffer with NULL
   for(size_t i=0u;i<messages_buffer_.size();++i){
@@ -238,7 +251,17 @@ void App::lidarHandler(const lcm::ReceiveBuffer* rbuf,
     if (processing_msg == NULL)
       return;
 
-    accu_->processLidar(processing_msg);
+    if(cl_cfg_.filter_ground_points) {
+      bot_core::planar_lidar_t filtered_points_msg;
+      filters->filter(*processing_msg, filtered_points_msg);
+
+      std::shared_ptr<bot_core::planar_lidar_t> filtered_points_msg_shrd = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(filtered_points_msg));
+
+      accu_->processLidar(filtered_points_msg_shrd);
+    }
+    else {
+      accu_->processLidar(processing_msg);
+    }
   }
 }
 
@@ -321,6 +344,16 @@ void App::convertPoseToIsam(Isometry3dTime currentPoseT){
 
     pc_vis_->convertCloudProntoToPcl(*accu_->getCloud(), *cloud_xyzrgb);
 
+    // because of filtering we could be left with no points in our pointcloud - then skip the saving
+    if(cloud_xyzrgb->points.size() <= 0) {
+      // clear the cloud
+      accu_->clearCloud();
+      // update the pose
+      previousPoseT_ = currentPoseT;
+      // stop execution
+      return;
+    }
+
     // now apply the transformation matrix that is world to the current pose inverse
     Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
     T_world_curr_pose.translation() << currentPoseT.pose.translation().x(), currentPoseT.pose.translation().y(), currentPoseT.pose.translation().z();
@@ -342,6 +375,7 @@ void App::convertPoseToIsam(Isometry3dTime currentPoseT){
     std::stringstream ss;
     ss << dirname_ << (isam_counter_-1) << ".pcd";
     writer_.write<pcl::PointXYZRGB> (ss.str (), *transformed_cloud, false);
+
 
     
     // visualization
@@ -377,13 +411,17 @@ int main(int argc, char **argv) {
   cl_cfg.save_pcs = true;
   cl_cfg.lidar_channel = "SICK_SCAN";
   double processing_rate = 1; // real time
+  cl_cfg.filter_ground_points = false;
+  cl_cfg.filter_range_points = false;
+  cl_cfg.angleLeft = -135; // left angle
+  cl_cfg.angleRight = 135; // right angle
+
 
   CloudAccumulateConfig ca_cfg;
   ca_cfg.batch_size = 99999;
   ca_cfg.lidar_channel = cl_cfg.lidar_channel;
   ca_cfg.max_range = 999;
   ca_cfg.min_range = 0;
-
 
   ConciseArgs parser(argc, argv, "simple-fusion");
   parser.add(cl_cfg.input_channel, "i", "input_channel", "input_channel - POSE_BODY typically");
@@ -393,9 +431,41 @@ int main(int argc, char **argv) {
   parser.add(cl_cfg.output_2d, "d", "output_2d", "output 2d isam constraints");
   parser.add(cl_cfg.save_pcs, "s", "save_pointclouds", "saves scans relative to poses");
   parser.add(cl_cfg.lidar_channel, "lc", "lidar_channel", "which lidar channel to listen to");
+  parser.add(cl_cfg.filter_ground_points, "fg", "filter_ground", "should I filter ground points?");
+  parser.add(cl_cfg.angleLeft, "fgleft", "filter_ground_angle_left", "filter points below this angle on the left[deg]");
+  parser.add(cl_cfg.angleRight, "fgright", "filter_ground_angle_right", "filter points below this angle on the right[deg]");
+  parser.add(cl_cfg.filter_range_points, "fr", "filter_range", "should I filter points b/w certain range?");
+  parser.add(ca_cfg.min_range, "frmin", "filter_range_min", "minimum distance from the lidar[m]");
+  parser.add(ca_cfg.max_range, "frmax", "filter_range_max", "maximum distance from the lidar[m]");
+  // parser.add(cl_cfg.filter_ground_points, "fg", "filter_ground", "should I filter ground points?");
   parser.parse();
-  
-  
+
+  FilteringParams params;
+  if(cl_cfg.filter_ground_points) {
+    params.types.push_back("Ground");
+    params.ground.angleLeft = cl_cfg.angleLeft;
+    params.ground.angleRight = cl_cfg.angleRight;
+  }
+
+  // summary of params
+  std::cout << "Running vo-slam-lidar with the following params:"           << std::endl;
+
+  std::cout << "Input channel: "             << cl_cfg.input_channel        << std::endl;
+  std::cout << "Log filename: "              << cl_cfg.in_log_fname         << std::endl;
+  std::cout << "Downsampling: "              << cl_cfg.output_period        << std::endl;
+  std::cout << "2D output: "                 << cl_cfg.output_2d            << std::endl;
+  std::cout << "Save pointclouds: "          << cl_cfg.save_pcs             << std::endl;
+  std::cout << "LIDAR channel: "             << cl_cfg.lidar_channel        << std::endl;
+  std::cout << "Ground pts filter: "         << cl_cfg.filter_ground_points << std::endl;
+  if(cl_cfg.filter_ground_points) {
+  std::cout << "Ground Filter Left angle: "  << cl_cfg.angleLeft            << std::endl;
+  std::cout << "Ground Filter Right angle: " << cl_cfg.angleRight           << std::endl;
+  }
+  std::cout << "Range pts filter: "          << cl_cfg.filter_range_points  << std::endl;
+  if(cl_cfg.filter_range_points) {
+  std::cout << "Range Filter min distance: " << ca_cfg.min_range            << std::endl;
+  std::cout << "Range Filter max distance: " << ca_cfg.max_range            << std::endl;
+  }
   
   bool running_from_log = !cl_cfg.in_log_fname.empty();
   boost::shared_ptr<lcm::LCM> lcm_recv;
@@ -416,6 +486,6 @@ int main(int argc, char **argv) {
   lcm_pub = boost::shared_ptr<lcm::LCM>(new lcm::LCM);
 
 
-  App app= App(lcm_recv, lcm_pub, cl_cfg, ca_cfg);
+  App app= App(lcm_recv, lcm_pub, cl_cfg, ca_cfg, params);
   while(0 == lcm_recv->handle());
 }

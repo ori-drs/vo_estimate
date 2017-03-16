@@ -149,14 +149,18 @@ void add_cloud(unsigned int idx_x0, const std::string dirname) {
 
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
 
+  // it could be the case that there is no such cloud for a certain pose - just skip
   if (pcl::io::loadPCDFile<pcl::PointXYZRGB> (cloud_loc.str(), *cloud) == -1) //* load the file
   {
     std::cerr << "Couldn't read file " << cloud_loc << std::endl;
+    // push an empty pointcloud to the vector of pointclouds
+    // when extracting the maps, the poses id must correspond to the cloud id
+    pcs.push_back(cloud);
     return;
   }
 
   
-  // add to a vector of clou
+  // add to a vector of clouds
   pcs.push_back(cloud);
 
   pconfig.reset = 0; // keep previous points
@@ -240,30 +244,36 @@ void parse_file(const std::string filename) {
 void extract_maps(const std::vector<int> start, const std::vector<int> end) {
   if(start.size() != end.size()) std::cout << "Invalid loop parameters" << std::endl;
 
+  std::cout << "PosesT size: " << posesT.size() << std::endl;
   // for each map loop
   for(size_t i = 0u; i<start.size(); ++i) {
-    // create a new pointclouds
+    // create a new pointcloud
     pcl::PointCloud<pcl::PointXYZRGB> cloud;
-    // get the clouds between start[i] and end[i] (they are already transformed, thus accumulate)
+    // get the clouds between start[i] and end[i] (thus accumulate)
     int duration = end[i] - start[i];
     std::cout << "Map " << i << " total poses:" << duration << std::endl;
     // for each pose/cloud
     for(size_t j = 0u; j<duration;j++) {
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
       // Isometry3dTime currentPoseT = posesTupdated.at(start[i]+j);
-      Isometry3dTime currentPoseT = posesT.at(start[i]+j);
+
+      // retrieve the updated pose
+      Pose2d_Node* node =  pg1_nodes[j];
+      isam::Pose2d  pose;
+      pose = (*node).value();
+
+      Eigen::Quaterniond quat = euler_to_quat(0,0, pose.t());
 
       // compute the transformation between the cloud and world(local)
       Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
-      T_world_curr_pose.translation() << currentPoseT.pose.translation().x(), currentPoseT.pose.translation().y(), currentPoseT.pose.translation().z();
+      T_world_curr_pose.translation() << pose.x(), pose.y(), 0;
 
-      Eigen::Quaterniond current_quat = Eigen::Quaterniond( currentPoseT.pose.rotation() );
-      T_world_curr_pose.rotate(current_quat);
+      T_world_curr_pose.rotate(quat);
 
-      // std::cout << "Transform matrix:" << T_world_curr_pose.inverse().matrix() << std::endl;
+      // std::cout << "Transform matrix:" << T_world_curr_pose.matrix() << std::endl;
       // transform the point cloud with the inverse of the transformation b/w world and the current pose
-      pcl::transformPointCloud (*pcs.at(start[i]+j), *transformed_cloud, T_world_curr_pose);
 
+      pcl::transformPointCloud (*pcs.at(start[i]+j), *transformed_cloud, T_world_curr_pose);
 
       cloud += *transformed_cloud;
     }
