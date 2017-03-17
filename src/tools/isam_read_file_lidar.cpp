@@ -136,12 +136,6 @@ void add_cloud(unsigned int idx_x1) {
     cloud->points[i].b = rgb[2]*255;
   }
 
-  if (idx_x1 == 5) {
-    std::stringstream ss;
-    ss << "test_cloud_" << idx_x1 << ".pcd";
-    writer_.write<pcl::PointXYZRGB>(ss.str(), *cloud, false);
-  }
-
   // add to a vector of clouds
   pcs.push_back(cloud);
 
