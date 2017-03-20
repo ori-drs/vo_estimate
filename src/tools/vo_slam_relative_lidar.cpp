@@ -1,37 +1,6 @@
-// Filter Chain to process Georges Square Husky Dataset (from 2016 06 07)
-// and to optimize the results with iSAM
-//
-// Filter Chain 1 - From LCM input ===========================================
-//
-// 1. Generate a Motion Trajectory using Visual Odometry (with IMU to constrain gravity drift):
-// se-simple-fusion -P husky/robot.cfg  -m 3   -p POSE_BODY_ON_IMU -L ~/logs/husky/2016-06-07-outdoor-experiment-with-MS-and-sick/lcmlog-2016-06-07.00-camera-10fps-three-loops-only -pr 0  
-// ... interested in the pose of the camera at each iteration at 10Hz (not the 100Hz IMU version)
-//
-// 2. Run this process to output the input constraints that isam needs (i.e. relative odometry)
-// in this case a downsampled trajectory in 3D.
-// se-vo-slam -L input_odometry.lcmlog -pr 0 -o 10
-// It is also possible to process in 3D without down sampling:
-// se-vo-slam -L input_odometry.lcmlog -pr 0
-//
-// 2b. The ever so subtle next step is to append to that trajectory some loop closure edges. Six were sufficient for this experiment
-//
-// 3. The iSAM executable can process the output text file husky_isam_trajectory.txt to produce a smoothed trajectory
-// The following works well for a very large 1200 trajectory in 2D
-// isam -L husky_isam_trajectory.txt  -W output.txt
-// The following works well for a very large 12,000 trajectory
-// isam -L husky_isam_trajectory.txt  -d 100 -u 100 -W output.txt
-// (the result is published to LCM collections)
-//
-//
-// Filter Chain 2 - From text input ===========================================  
-// 
-// 1. Use vo (as above) to write an pose_trajectory.txt of this format:
-// utime x y z qw qx qy qz roll pitch yaw
-//
-// 2. Read the text file using the mode implemented below (but commented out)
-// This will output the same files as #2 above
-// 
-// 3. Use iSAM as in #3 above
+// Tool to process sensor data to iSAM format
+// Details:
+// https://github.com/robotperception/rpg-navigation/issues/96
 
 #include <string>
 #include <iostream>
@@ -86,27 +55,29 @@ class App{
   private:
     BotParam* botparam_;
     BotFrames* botframes_;
+    pronto_vis* pc_vis_;
 
     const CommandLineConfig cl_cfg_;
 
     // filters
     const FilteringParams filtering_params_;
 
-    // cloud accumulate
     CloudAccumulate* accu_;
     CloudAccumulateConfig ca_cfg_;
 
     boost::shared_ptr<lcm::LCM> lcm_recv_;
     boost::shared_ptr<lcm::LCM> lcm_pub_;
 
+    // Handlers
     void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::pose_t* msg);
     void lidarHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::planar_lidar_t* msg);
-
+    void velodyneHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::pointcloud2_t* msg);    
+    // Local Methods
     void loadPoseTrajectory(std::string database_path, std::string fname);
-    void convertPoseToIsam(Isometry3dTime currentPoseT);
+    void writePoses(Isometry3dTime currentPoseT);
+    void writePointClouds(Isometry3dTime currentPoseT);
 
-    pronto_vis* pc_vis_;
-
+    // Data 
     Isometry3dTime previousPoseT_;
 
     int isam_counter_;
@@ -118,9 +89,10 @@ class App{
     pcl::PCDWriter writer_;
 
     std::string dirname_;
+
 };    
 
-App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg, const FilteringParams&filtering_params) : 
+App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg) : 
        lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), 
        previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14), filtering_params_(filtering_params)
 {
@@ -163,7 +135,15 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
   }
 
   lcm_recv_->subscribe( cl_cfg_.input_channel, &App::poseHandler,this);
-  lcm_recv_->subscribe( cl_cfg_.lidar_channel, &App::lidarHandler,this);
+  if(cl_cfg_.save_pcs) {
+    if (ca_cfg_.lidar_channel != "VELODYNE"){
+      lcm_recv_->subscribe( cl_cfg_.lidar_channel, &App::lidarHandler,this);
+    }else{
+      lcm_recv_->subscribe( cl_cfg_.lidar_channel, &App::velodyneHandler,this);
+      std::cout << "Using specific Velodyne subscriber\n";
+    }
+  }
+
 
   isam_trajectory.open("husky_isam_trajectory.txt");//, ios::out | ios::app | ios::binary);
   world_trajectory.open("husky_world_trajectory.txt");//, ios::out | ios::app | ios::binary);
@@ -181,7 +161,7 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
   loadPoseTrajectory(database_path, fname);
   pc_vis_->pose_collection_to_lcm_from_list(4004, pose_trajectory_);
   for (size_t i = 0; i < pose_trajectory_.size() ; i++){
-     convertPoseToIsam(pose_trajectory_[i] );
+     writePoses(pose_trajectory_[i] );
   }
   cout <<"Finished converting to iSAM format\n";
   exit(-1);
@@ -240,42 +220,103 @@ void App::loadPoseTrajectory(std::string database_path, std::string fname){
 
 void App::lidarHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::planar_lidar_t* msg){
-  if(cl_cfg_.save_pcs) {
-    // Push into a queue and pull from front, to add some delay redundency
-    // here we are using a 3 sample queue - so about 0.075sec of delay added
-    std::shared_ptr<bot_core::planar_lidar_t> this_msg = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(*msg));
-    messages_buffer_.push_back(this_msg);
+  // Push into a queue and pull from front, to add some delay redundency
+  std::shared_ptr<bot_core::planar_lidar_t> this_msg = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(*msg));
+  messages_buffer_.push_back(this_msg);
 
-    // get the front one
-    std::shared_ptr<bot_core::planar_lidar_t> processing_msg = messages_buffer_[0];
-    if (processing_msg == NULL)
-      return;
+  // get the front one
+  std::shared_ptr<bot_core::planar_lidar_t> processing_msg = messages_buffer_[0];
+  if (processing_msg == NULL)
+    return;
 
-    if(cl_cfg_.filter_ground_points) {
-      bot_core::planar_lidar_t filtered_points_msg;
-      filters->filter(*processing_msg, filtered_points_msg);
+  if(cl_cfg_.filter_ground_points) {
+    bot_core::planar_lidar_t filtered_points_msg;
+    filters->filter(*processing_msg, filtered_points_msg);
 
-      std::shared_ptr<bot_core::planar_lidar_t> filtered_points_msg_shrd = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(filtered_points_msg));
+    std::shared_ptr<bot_core::planar_lidar_t> filtered_points_msg_shrd = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(filtered_points_msg));
 
-      accu_->processLidar(filtered_points_msg_shrd);
-    }
-    else {
-      accu_->processLidar(processing_msg);
-    }
+    accu_->processLidar(filtered_points_msg_shrd);
   }
+  else {
+    accu_->processLidar(processing_msg);
+  }
+}
+
+void App::velodyneHandler(const lcm::ReceiveBuffer* rbuf,
+     const std::string& channel, const  bot_core::pointcloud2_t* msg){
+
+  // Empty the cloud buffer each time
+  accu_->clearCloud();
+  accu_->processVelodyne(msg);
+
 }
 
 
 void App::poseHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  bot_core::pose_t* msg){
   Isometry3dTime currentPoseT = pronto::getPoseAsIsometry3dTime(msg);
-  convertPoseToIsam(currentPoseT);
+  writePoses(currentPoseT);
 }
 
-// 0 will skip first 10 frames and print the 10th
-// 1 will print the first frame
+
+
+
+void App::writePointClouds(Isometry3dTime currentPoseT){
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_xyzrgb(new pcl::PointCloud<pcl::PointXYZRGB>());
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
+
+  pc_vis_->convertCloudProntoToPcl(*accu_->getCloud(), *cloud_xyzrgb);
+
+  // because of filtering we could be left with no points in our pointcloud - then skip the saving
+  if(cloud_xyzrgb->points.size() <= 0) {
+    // clear the cloud
+    accu_->clearCloud();
+    // update the pose
+    previousPoseT_ = currentPoseT;
+    // stop execution
+    return;
+  }
+
+  // now apply the transformation matrix that is world to the current pose inverse
+  Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
+  T_world_curr_pose.translation() << currentPoseT.pose.translation().x(), currentPoseT.pose.translation().y(), currentPoseT.pose.translation().z();
+
+  Eigen::Quaterniond current_quat = Eigen::Quaterniond( currentPoseT.pose.rotation() );
+  T_world_curr_pose.rotate(current_quat);
+
+  // std::cout << "Transform matrix:" << T_world_curr_pose.inverse().matrix() << std::endl;
+  // transform the point cloud with the inverse of the transformation b/w world and the current pose
+  pcl::transformPointCloud (*cloud_xyzrgb, *transformed_cloud, T_world_curr_pose.inverse());
+
+  pronto::PointCloud* transformed_cloud_pronto (new pronto::PointCloud);
+  pc_vis_->convertCloudPclToPronto(*transformed_cloud,*transformed_cloud_pronto);
+
+  transformed_cloud->width = 1;
+  transformed_cloud->height = transformed_cloud->points.size();
+
+  // save the transformed point cloud
+  std::stringstream ss;
+  ss << dirname_ << (isam_counter_-1) << ".pcd";
+  writer_.write<pcl::PointXYZRGB> (ss.str (), *transformed_cloud, false);
+
+
+  // Visualise the output
+  // Use the counter to select a color from pc_vis colors
+  int color_counter = isam_counter_ % (pc_vis_->colors.size()/3);
+  std::vector<float> this_color = {pc_vis_->colors[color_counter*3],
+                     pc_vis_->colors[color_counter*3+1], pc_vis_->colors[color_counter*3+2]};
+
+  ptcld_cfg pconfig = ptcld_cfg(PCOFFSETID+1,  "Cloud",1,!RESET, PCOFFSETID,1,this_color );
+  pc_vis_->ptcld_to_lcm(pconfig, *transformed_cloud_pronto, currentPoseT.utime, currentPoseT.utime);
+
+  // empty the accumulator
+  accu_->clearCloud();
+}
+
+
+
 int counter =0; 
-void App::convertPoseToIsam(Isometry3dTime currentPoseT){
+void App::writePoses(Isometry3dTime currentPoseT){
   counter++;
 
   if (previousPoseT_.utime == 0){
@@ -337,64 +378,13 @@ void App::convertPoseToIsam(Isometry3dTime currentPoseT){
     world_trajectory.flush();
   }
 
-  // retrieve the accumulated point cloud up until now and store it relative to the current pose - isam_counter_
+  obj_cfg ocfg = obj_cfg(PCOFFSETID, "Pose", VS_OBJECT_COLLECTION_T_AXIS3D, !RESET);
+  pc_vis_->pose_to_lcm(ocfg,currentPoseT);
+
+
+  // 3. retrieve the accumulated point cloud up until now and store it relative to the current pose
   if(cl_cfg_.save_pcs) {
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_xyzrgb(new pcl::PointCloud<pcl::PointXYZRGB>());
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
-
-    pc_vis_->convertCloudProntoToPcl(*accu_->getCloud(), *cloud_xyzrgb);
-
-    // because of filtering we could be left with no points in our pointcloud - then skip the saving
-    if(cloud_xyzrgb->points.size() <= 0) {
-      // clear the cloud
-      accu_->clearCloud();
-      // update the pose
-      previousPoseT_ = currentPoseT;
-      // stop execution
-      return;
-    }
-
-    // now apply the transformation matrix that is world to the current pose inverse
-    Eigen::Affine3d T_world_curr_pose = Eigen::Affine3d::Identity();
-    T_world_curr_pose.translation() << currentPoseT.pose.translation().x(), currentPoseT.pose.translation().y(), currentPoseT.pose.translation().z();
-
-    Eigen::Quaterniond current_quat = Eigen::Quaterniond( currentPoseT.pose.rotation() );
-    T_world_curr_pose.rotate(current_quat);
-
-    // std::cout << "Transform matrix:" << T_world_curr_pose.inverse().matrix() << std::endl;
-    // transform the point cloud with the inverse of the transformation b/w world and the current pose
-    pcl::transformPointCloud (*cloud_xyzrgb, *transformed_cloud, T_world_curr_pose.inverse());
-
-    pronto::PointCloud* transformed_cloud_pronto (new pronto::PointCloud);
-    pc_vis_->convertCloudPclToPronto(*transformed_cloud,*transformed_cloud_pronto);
-
-    transformed_cloud->width = 1;
-    transformed_cloud->height = transformed_cloud->points.size();
-
-    // save the transformed point cloud
-    std::stringstream ss;
-    ss << dirname_ << (isam_counter_-1) << ".pcd";
-    writer_.write<pcl::PointXYZRGB> (ss.str (), *transformed_cloud, false);
-
-
-    
-    // visualization
-    // id, name, visualise as, reset
-    std::stringstream ss_pose_name;
-    ss_pose_name << "Pose " << (isam_counter_-1);
-    obj_cfg ocfg = obj_cfg((isam_counter_-1), ss_pose_name.str(), VS_OBJECT_COLLECTION_T_AXIS3D, RESET);
-    pc_vis_->pose_to_lcm(ocfg,currentPoseT);
-
-    
-    // id, name, visualsie as, reset, frame_id, (-1 - automatically asign, 0 - no color, 1 - use the rgb param), rgb
-    std::stringstream ss_cl_name;
-    ss_cl_name << "Cloud " << PCOFFSETID+(isam_counter_-1);
-    ptcld_cfg pconfig = ptcld_cfg(PCOFFSETID+(isam_counter_-1),  ss_cl_name.str(),1,RESET, (isam_counter_-1),1,{0.2,0.2,0.2} );
-    // 0
-    pc_vis_->ptcld_to_lcm(pconfig, *transformed_cloud_pronto, currentPoseT.utime, currentPoseT.utime);
-    
-    // empty the accumulator
-    accu_->clearCloud();
+    writePointClouds(currentPoseT);
   }
 
   previousPoseT_ = currentPoseT;
@@ -419,7 +409,6 @@ int main(int argc, char **argv) {
 
   CloudAccumulateConfig ca_cfg;
   ca_cfg.batch_size = 99999;
-  ca_cfg.lidar_channel = cl_cfg.lidar_channel;
   ca_cfg.max_range = 999;
   ca_cfg.min_range = 0;
 
@@ -439,6 +428,8 @@ int main(int argc, char **argv) {
   parser.add(ca_cfg.max_range, "frmax", "filter_range_max", "maximum distance from the lidar[m]");
   // parser.add(cl_cfg.filter_ground_points, "fg", "filter_ground", "should I filter ground points?");
   parser.parse();
+
+  ca_cfg.lidar_channel = cl_cfg.lidar_channel;
 
   FilteringParams params;
   if(cl_cfg.filter_ground_points) {
