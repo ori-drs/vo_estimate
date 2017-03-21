@@ -19,7 +19,7 @@
 #include <cloud_accumulate/cloud_accumulate.hpp>
 
 // dift filters
-#include "diftFilters/filtering.hpp"
+#include "pronto_lidar_filters/lidar_filters.hpp"
 
 #include <path_util/path_util.h>
 
@@ -44,12 +44,11 @@ std::ofstream world_trajectory;
 
 const int PCOFFSETID = 1000000;
 const uint8_t RESET = 1;
-std::unique_ptr<dift::AbstractFilters> filters;
 
 class App{
   public:
-    App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg, const FilteringParams& filtering_params);
-    
+    App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg);
+
     ~App(){}
 
   private:
@@ -60,7 +59,7 @@ class App{
     const CommandLineConfig cl_cfg_;
 
     // filters
-    const FilteringParams filtering_params_;
+    pronto_lidar_filters* filters_;
 
     CloudAccumulate* accu_;
     CloudAccumulateConfig ca_cfg_;
@@ -71,13 +70,13 @@ class App{
     // Handlers
     void poseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::pose_t* msg);
     void lidarHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::planar_lidar_t* msg);
-    void velodyneHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::pointcloud2_t* msg);    
+    void velodyneHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const bot_core::pointcloud2_t* msg);
     // Local Methods
     void loadPoseTrajectory(std::string database_path, std::string fname);
     void writePoses(Isometry3dTime currentPoseT);
     void writePointClouds(Isometry3dTime currentPoseT);
 
-    // Data 
+    // Data
     Isometry3dTime previousPoseT_;
 
     int isam_counter_;
@@ -90,11 +89,10 @@ class App{
 
     std::string dirname_;
 
-};    
+};
 
-App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg) : 
-       lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), 
-       previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14), filtering_params_(filtering_params)
+App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg) :
+       lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14)
 {
   do {
     botparam_ = bot_param_new_from_server(lcm_recv_->getUnderlyingLCM(), 0); // 1 means keep updated, 0 would ignore updates
@@ -106,7 +104,7 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
   accu_ = new CloudAccumulate(lcm_recv_, ca_cfg_, botparam_, botframes_);
 
   // init filters
-  filters = std::unique_ptr<dift::AbstractFilters>(new dift::AbstractFilters(filtering_params_));
+  filters_ = new pronto_lidar_filters((cl_cfg_.angleLeft*M_PI/180), (cl_cfg_.angleRight*M_PI/180), ca_cfg_.min_range, ca_cfg_.max_range);
 
   // Populate buffer with NULL
   for(size_t i=0u;i<messages_buffer_.size();++i){
@@ -219,7 +217,7 @@ void App::loadPoseTrajectory(std::string database_path, std::string fname){
 }
 
 void App::lidarHandler(const lcm::ReceiveBuffer* rbuf,
-     const std::string& channel, const  bot_core::planar_lidar_t* msg){
+     const std::string& channel, const bot_core::planar_lidar_t* msg){
   // Push into a queue and pull from front, to add some delay redundency
   std::shared_ptr<bot_core::planar_lidar_t> this_msg = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(*msg));
   messages_buffer_.push_back(this_msg);
@@ -231,7 +229,7 @@ void App::lidarHandler(const lcm::ReceiveBuffer* rbuf,
 
   if(cl_cfg_.filter_ground_points) {
     bot_core::planar_lidar_t filtered_points_msg;
-    filters->filter(*processing_msg, filtered_points_msg);
+    filters_->removeOuterPoints(*processing_msg, filtered_points_msg);
 
     std::shared_ptr<bot_core::planar_lidar_t> filtered_points_msg_shrd = std::shared_ptr<bot_core::planar_lidar_t>(new bot_core::planar_lidar_t(filtered_points_msg));
 
@@ -394,7 +392,7 @@ void App::writePoses(Isometry3dTime currentPoseT){
 
 int main(int argc, char **argv) {
   CommandLineConfig cl_cfg;
-  cl_cfg.input_channel = "POSE_BODY";  
+  cl_cfg.input_channel = "POSE_BODY";
   cl_cfg.in_log_fname = "";
   cl_cfg.output_period = 1; // don't skip any. another option would be 10 - skip every 10
   cl_cfg.output_2d = false;
@@ -431,13 +429,6 @@ int main(int argc, char **argv) {
 
   ca_cfg.lidar_channel = cl_cfg.lidar_channel;
 
-  FilteringParams params;
-  if(cl_cfg.filter_ground_points) {
-    params.types.push_back("Ground");
-    params.ground.angleLeft = cl_cfg.angleLeft;
-    params.ground.angleRight = cl_cfg.angleRight;
-  }
-
   // summary of params
   std::cout << "Running vo-slam-lidar with the following params:"           << std::endl;
 
@@ -457,7 +448,7 @@ int main(int argc, char **argv) {
   std::cout << "Range Filter min distance: " << ca_cfg.min_range            << std::endl;
   std::cout << "Range Filter max distance: " << ca_cfg.max_range            << std::endl;
   }
-  
+
   bool running_from_log = !cl_cfg.in_log_fname.empty();
   boost::shared_ptr<lcm::LCM> lcm_recv;
   boost::shared_ptr<lcm::LCM> lcm_pub;
@@ -477,6 +468,6 @@ int main(int argc, char **argv) {
   lcm_pub = boost::shared_ptr<lcm::LCM>(new lcm::LCM);
 
 
-  App app= App(lcm_recv, lcm_pub, cl_cfg, ca_cfg, params);
+  App app= App(lcm_recv, lcm_pub, cl_cfg, ca_cfg);
   while(0 == lcm_recv->handle());
 }

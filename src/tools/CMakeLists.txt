@@ -15,7 +15,7 @@ set(PCL_LIBRARIES pcl_io-1.7 pcl_common-1.7 pcl_filters-1.7 pcl_features-1.7 pcl
 ############## vo slam w/ relative lidar points
 add_executable(se-vo-slam-lidar vo_slam_relative_lidar.cpp)
 pods_use_pkg_config_packages(se-vo-slam-lidar path-util   eigen3  pronto_vis bot2-frames ${PCL_LIBRARIES})
-target_link_libraries(se-vo-slam-lidar lcm boost_system boost_thread cloud_accumulate pthread  pronto_vis  boost_filesystem ${VTK_LIBRARIES} diftFilters)
+target_link_libraries(se-vo-slam-lidar lcm boost_system boost_thread cloud_accumulate pthread  pronto_vis  boost_filesystem ${VTK_LIBRARIES} pronto_lidar_filters)
 pods_install_executables(se-vo-slam-lidar)
 
 
