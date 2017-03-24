@@ -92,7 +92,7 @@ class App{
 };
 
 App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lcm_pub_, const CommandLineConfig& cl_cfg_, const CloudAccumulateConfig& ca_cfg) :
-       lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(14)
+       lcm_recv_(lcm_recv_), lcm_pub_(lcm_pub_), cl_cfg_(cl_cfg_), previousPoseT_(0,Eigen::Isometry3d::Identity()), ca_cfg_(ca_cfg), messages_buffer_(20)
 {
   do {
     botparam_ = bot_param_new_from_server(lcm_recv_->getUnderlyingLCM(), 0); // 1 means keep updated, 0 would ignore updates
