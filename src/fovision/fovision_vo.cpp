@@ -226,7 +226,7 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     world_to_camera_ = M * Eigen::Isometry3d::Identity();
     world_to_camera_.translation().x() = 0;
     world_to_camera_.translation().y() = 0;
-    world_to_camera_.translation().z() = 1.65; // nominal head height
+    world_to_camera_.translation().z() = 0;
 
     // Useful for Valkyrie logs: initialise with camera frame upside down but horizontal
     /*Eigen::Matrix3d M;

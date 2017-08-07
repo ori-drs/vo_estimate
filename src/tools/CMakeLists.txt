@@ -32,3 +32,10 @@ pods_use_pkg_config_packages(se-isam-lidar
     pronto_vis pronto_math  eigen3 )
 target_link_libraries (se-isam-lidar isam cholmod boost_system )
 pods_install_executables(se-isam-lidar)
+
+###############
+add_executable(se-transform-printer transform-printer.cpp)
+pods_use_pkg_config_packages(se-transform-printer bot2-frames_cpp
+    pronto_vis pronto_math  eigen3 bot2-frames  )
+target_link_libraries (se-transform-printer isam cholmod boost_system )
+pods_install_executables(se-transform-printer)
