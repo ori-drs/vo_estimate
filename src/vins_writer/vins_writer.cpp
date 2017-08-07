@@ -1,4 +1,5 @@
-// Write out flat files for VINS: ORBSLAM and OkVis
+// Write out flat files for VINS - OkVis
+// ORBSLAM support removed for now
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -27,9 +28,10 @@ class Pass{
     
     ~Pass(){
       std::cout << "finish\n";
-      orbslam_image_timestamp_file_.close();
 
-      okvis_ins_timestamp_file_.close();
+      okvis_cam0_timestamp_file_.close();
+      okvis_cam1_timestamp_file_.close();
+      okvis_imu0_timestamp_file_.close();
     }    
   private:
     boost::shared_ptr<lcm::LCM> lcm_;
@@ -40,8 +42,9 @@ class Pass{
     uint8_t* img_buf_; 
     uint8_t* rgb_compress_buffer_;
 
-    ofstream orbslam_image_timestamp_file_;
-    ofstream okvis_ins_timestamp_file_;
+    ofstream okvis_imu0_timestamp_file_;
+    ofstream okvis_cam0_timestamp_file_;
+    ofstream okvis_cam1_timestamp_file_;
     
     void imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg);
@@ -65,24 +68,27 @@ Pass::Pass(boost::shared_ptr<lcm::LCM> &lcm_, bool verbose_,
 
   rgb_compress_buffer_= (uint8_t*) malloc(3* 1524  * 1544);
 
-  boost::filesystem::path dir(output_folder_);
-  boost::filesystem::create_directory(dir);
-  boost::filesystem::path dir2( std::string(output_folder_ + "/left_cam") );
-  boost::filesystem::create_directory(dir2);
-  boost::filesystem::path dir3( std::string(output_folder_ + "/right_cam") );
-  boost::filesystem::create_directory(dir3);
-  boost::filesystem::path dir4( std::string(output_folder_ + "/imu0") );
-  boost::filesystem::create_directory(dir4);
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_) ));
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_ + "/cam0") ));
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_ + "/cam0/data") ));
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_ + "/cam1") ));
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_ + "/cam1/data") ));
+  boost::filesystem::create_directory(boost::filesystem::path( std::string(output_folder_ + "/imu0") ));
 
-  std::stringstream ss;
-  ss << output_folder_ << "/" << "timestamps.txt";
-  orbslam_image_timestamp_file_.open (ss.str().c_str() );
+  std::stringstream ss1;
+  ss1 << output_folder_ << "/" << "cam0/data.csv";
+  okvis_cam0_timestamp_file_.open (ss1.str().c_str() );
+  okvis_cam0_timestamp_file_ << "#timestamp [ns],filename\n";
 
+  std::stringstream ss3;
+  ss3 << output_folder_ << "/" << "cam1/data.csv"; 
+  okvis_cam1_timestamp_file_.open (ss3.str().c_str() );
+  okvis_cam1_timestamp_file_ << "#timestamp [ns],filename\n";
 
   std::stringstream ss2;
   ss2 << output_folder_ << "/" << "/imu0/data.csv";
-  okvis_ins_timestamp_file_.open (ss2.str().c_str() );
-  okvis_ins_timestamp_file_ << "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],a_RS_S_z [m s^-2]\n";
+  okvis_imu0_timestamp_file_.open (ss2.str().c_str() );
+  okvis_imu0_timestamp_file_ << "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],a_RS_S_z [m s^-2]\n";
 }
 
 void Pass::insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::ins_t* msg){
@@ -98,7 +104,7 @@ void Pass::insHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel
      << msg->accel[1] << ","
      << msg->accel[2];
 
-  okvis_ins_timestamp_file_ << ss.str() << "\n";
+  okvis_imu0_timestamp_file_ << ss.str() << "\n";
 
 }
 
@@ -108,34 +114,39 @@ void Pass::imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& chan
 
   int w = msg->images[0].width;
   int h = msg->images[0].height;
-  int n_colors =3;
   
+  // left is cam0
   imgutils_->decodeImageToGray( & msg->images[0], img_buf_);
-  cv::Mat img(cv::Size( w, h),CV_8UC1);
-  img.data = img_buf_;
+  cv::Mat cam0(cv::Size( w, h),CV_8UC1);
+  cam0.data = img_buf_;
   std::stringstream ss;
   ss.precision(21);
-  ss << output_folder_ << "/left_cam/" << msg->utime*1E3 << ".png";
+  ss << output_folder_ << "/cam0/data/" << msg->utime*1E3 << ".png";
   std::cout << ss.str() << "\n";
   //cv::cvtColor(img, img, CV_RGB2BGR);
-  imwrite( ss.str(), img);
+  imwrite( ss.str(), cam0);
 
 
-
+  // right is cam1
   imgutils_->decodeImageToGray( & msg->images[1], img_buf_);
-  cv::Mat img2(cv::Size( w, h),CV_8UC1);
-  img2.data = img_buf_;
+  cv::Mat cam1(cv::Size( w, h),CV_8UC1);
+  cam1.data = img_buf_;
   std::stringstream ss2;
   ss2.precision(21);
-  ss2 << output_folder_ << "/right_cam/" << msg->utime*1E3 << ".png";
+  ss2 << output_folder_ << "/cam1/data/" << msg->utime*1E3 << ".png";
   std::cout << ss2.str() << "\n";
   //cv::cvtColor(img, img, CV_RGB2BGR);
-  imwrite( ss2.str(), img2);
+  imwrite( ss2.str(), cam1);
 
 
-
-  orbslam_image_timestamp_file_ << msg->utime << "\n";
-  orbslam_image_timestamp_file_.flush();
+  std::stringstream ss3;
+  ss3.precision(21);
+  ss3 << msg->utime*1E3 << ","
+     << msg->utime*1E3 << ".png";
+  okvis_cam0_timestamp_file_ << ss3.str() << "\n";
+  okvis_cam1_timestamp_file_ << ss3.str() << "\n";
+  okvis_cam0_timestamp_file_.flush();
+  okvis_cam1_timestamp_file_.flush();
 
 }
 
@@ -143,8 +154,8 @@ void Pass::imagesHandler(const lcm::ReceiveBuffer* rbuf, const std::string& chan
 int main( int argc, char** argv ){
   ConciseArgs parser(argc, argv, "vins-writer");
   bool verbose=false;
-  string image_channel="MULTISENSE_CAMERA";
-  string ins_channel="MICROSTRAIN_INS";
+  string image_channel="CAMERA";
+  string ins_channel="MICROSTRAIN";
   string output_folder="/tmp/vins";
   parser.add(verbose, "v", "verbose", "Verbosity");
   parser.add(image_channel, "c", "image_channel", "Image channel");
