@@ -29,7 +29,7 @@ pods_install_executables(se-simple-isam-demo)
 ###############
 add_executable(se-isam-lidar isam_read_file_lidar.cpp)
 pods_use_pkg_config_packages(se-isam-lidar
-    pronto_vis pronto_math  eigen3 )
+    pronto_vis pronto_math  eigen3 pcl_io-1.7)
 target_link_libraries (se-isam-lidar isam cholmod boost_system )
 pods_install_executables(se-isam-lidar)
 

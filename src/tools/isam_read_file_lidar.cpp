@@ -115,7 +115,7 @@ void add_cloud(unsigned int idx_x1) {
   // it could be the case that there is no such cloud for a certain pose - just skip
   if (pcl::io::loadPCDFile<pcl::PointXYZRGB> (cloud_loc.str(), *cloud) == -1) //* load the file
   {
-    std::cerr << std::endl << "Couldn't read file " << cloud_loc << std::endl;
+    std::cerr << std::endl << "Couldn't read file " << cloud_loc.str() << std::endl;
     // push an empty pointcloud to the vector of pointclouds
     // when extracting the maps, the poses id must correspond to the cloud id
     pcs.push_back(cloud);
