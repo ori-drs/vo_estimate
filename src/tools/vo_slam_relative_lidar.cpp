@@ -245,7 +245,7 @@ void App::velodyneHandler(const lcm::ReceiveBuffer* rbuf,
 
   // Empty the cloud buffer each time
   accu_->clearCloud();
-  accu_->processVelodyne(msg);
+  accu_->processPointcloud2(msg);
 
 }
 
