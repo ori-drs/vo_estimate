@@ -122,8 +122,14 @@ App::App(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr<lcm::LCM> &lc
   //std::cout << temp_matrix << "\n";
   //camera_to_body.matrix();
 
+  Eigen::Isometry3d b2s;
+  botframes_cpp_->get_trans_with_utime( botframes_ ,  "ori_VELODYNE_FIXED", "body"  , 0, b2s);
+  Eigen::Affine3d b2s_aff = b2s;
+  std::cout << b2s.matrix() << " b2s\n";
 
-
+  std::cout << print_Isometry3d(b2s) << "\n"; 
+//  Eigen::Quaterniond  q = Eigen::Quaterniond(b2s.rotation()) ;
+  //std::cout << q
 
 }
 

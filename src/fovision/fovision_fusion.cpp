@@ -14,6 +14,7 @@
 #include <bot_frames_cpp/bot_frames_cpp.hpp>
 
 #include <lcmtypes/bot_core.hpp>
+#include <lcmtypes/pronto.hpp>
 
 #include "drcvision/voconfig.hpp"
 #include "drcvision/vofeatures.hpp"
@@ -94,6 +95,9 @@ class StereoOdom{
     VoEstimator* estimator_;
     void featureAnalysis();
     void updateMotion();
+
+    // VO from another source:
+    void odometryHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  pronto::update_t* msg);
 
     void multisenseHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
     void multisenseLDHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  bot_core::images_t* msg);
@@ -176,13 +180,22 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
 
   Eigen::Isometry3d init_pose;
   init_pose = Eigen::Isometry3d::Identity();
-  init_pose.translation() = Eigen::Vector3d(0,0,1.65); // nominal head height
+  init_pose.translation() = Eigen::Vector3d(0,0,0); // set nominal head height
+  Eigen::Quaterniond quat = euler_to_quat(0,0.29,0); // nominal pitch and roll
+  init_pose.rotate(quat);
   estimator_->setBodyPose(init_pose);
 
   // IMU:
   pose_initialized_=false;
   imu_counter_=0;
-  lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::multisenseHandler,this);
+
+  if (cl_cfg_.input_channel == "STEREO_ODOMETRY"){
+    std::cout << "subscribing to "<< cl_cfg_.input_channel <<" for relative VO measurements\n";
+    lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::odometryHandler,this);
+  }else{
+    std::cout << "subscribing to " << cl_cfg_.input_channel << " for images\n";
+    lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::multisenseHandler,this);
+  }
   lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
   // This assumes the imu to body frame is fixed, need to update if the neck is actuated
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, body_to_imu_);
@@ -195,6 +208,40 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
   }
 
   cout <<"StereoOdom Constructed\n";
+}
+
+
+void StereoOdom::odometryHandler(const lcm::ReceiveBuffer* rbuf,
+     const std::string& channel, const  pronto::update_t* msg){
+  std::cout << "got vo"<< msg->timestamp<<"\n";
+
+  pose_initialized_ = true;
+
+  utime_prev_ = msg->prev_timestamp;
+  utime_cur_ = msg->timestamp;
+
+  Eigen::Isometry3d delta_camera;
+
+  Eigen::Quaterniond quat;
+  quat.w() = msg->rotation[0];  quat.x() = msg->rotation[1];
+  quat.y() = msg->rotation[2];  quat.z() = msg->rotation[3];
+
+  delta_camera.setIdentity();
+  delta_camera.translation().x() = msg->translation[0];
+  delta_camera.translation().y() = msg->translation[1];
+  delta_camera.translation().z() = msg->translation[2];
+  delta_camera.rotate(quat);
+  
+
+  // 3. Update the motion estimation:
+  estimator_->updatePosition(utime_cur_, utime_prev_, delta_camera);
+
+  // Publish the current estimate
+  Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
+
+  estimator_->publishUpdate(utime_cur_, local_to_body, "POSE_BODY", false);
+  //lcm_pub_->publish("CAMERA_REPUBLISH", msg);
+
 }
 
 
