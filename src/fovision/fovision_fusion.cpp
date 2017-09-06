@@ -15,6 +15,7 @@
 
 #include <lcmtypes/bot_core.hpp>
 #include <lcmtypes/pronto.hpp>
+#include <lcmtypes/ori.hpp>
 
 #include "drcvision/voconfig.hpp"
 #include "drcvision/vofeatures.hpp"
@@ -111,6 +112,8 @@ class StereoOdom{
     void fuseInterial(Eigen::Quaterniond local_to_body_orientation_from_imu, int64_t utime);
     Eigen::Isometry3d body_to_imu_, imu_to_camera_;
     
+    void oxtsHandler(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const  ori::navigationframedata_t* msg);
+
     // previous successful vo estimates as rates:
     Eigen::Vector3d vo_velocity_linear_;
     Eigen::Vector3d vo_velocity_angular_;
@@ -193,10 +196,17 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
     std::cout << "subscribing to "<< cl_cfg_.input_channel <<" for relative VO measurements\n";
     lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::odometryHandler,this);
   }else{
-    std::cout << "subscribing to " << cl_cfg_.input_channel << " for images\n";
+    std::cout << "subscribing to " << cl_cfg_.input_channel << " for images and will do VO\n";
     lcm_recv_->subscribe( cl_cfg_.input_channel, &StereoOdom::multisenseHandler,this);
   }
-  lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
+
+  if (cl_cfg_.imu_channel == "OXTS"){
+    lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::oxtsHandler,this);
+  }else{
+    lcm_recv_->subscribe( cl_cfg_.imu_channel, &StereoOdom::microstrainHandler,this);
+  }
+
+
   // This assumes the imu to body frame is fixed, need to update if the neck is actuated
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "body", "imu", 0, body_to_imu_);
   botframes_cpp_->get_trans_with_utime( botframes_ ,  "imu",  string( cl_cfg_.camera_config + "_LEFT" ).c_str(), 0, imu_to_camera_);
@@ -213,35 +223,31 @@ StereoOdom::StereoOdom(boost::shared_ptr<lcm::LCM> &lcm_recv_, boost::shared_ptr
 
 void StereoOdom::odometryHandler(const lcm::ReceiveBuffer* rbuf,
      const std::string& channel, const  pronto::update_t* msg){
-  std::cout << "got vo"<< msg->timestamp<<"\n";
+  //  std::cout << "got vo"<< msg->timestamp<<"\n";
 
-  pose_initialized_ = true;
+  if (!pose_initialized_){
+    fuseInterial(local_to_body_orientation_from_imu_, msg->timestamp);
+    return;
+  }
 
   utime_prev_ = msg->prev_timestamp;
   utime_cur_ = msg->timestamp;
 
+  // Update current estimate using vo for odometry
   Eigen::Isometry3d delta_camera;
-
   Eigen::Quaterniond quat;
   quat.w() = msg->rotation[0];  quat.x() = msg->rotation[1];
   quat.y() = msg->rotation[2];  quat.z() = msg->rotation[3];
-
   delta_camera.setIdentity();
   delta_camera.translation().x() = msg->translation[0];
   delta_camera.translation().y() = msg->translation[1];
   delta_camera.translation().z() = msg->translation[2];
   delta_camera.rotate(quat);
-  
-
-  // 3. Update the motion estimation:
   estimator_->updatePosition(utime_cur_, utime_prev_, delta_camera);
 
-  // Publish the current estimate
-  Eigen::Isometry3d local_to_body = estimator_->getBodyPose();
-
-  estimator_->publishUpdate(utime_cur_, local_to_body, "POSE_BODY", false);
-  //lcm_pub_->publish("CAMERA_REPUBLISH", msg);
-
+  // correct roll and pitch using inertial (typically)
+  // also publishes main pose message
+  fuseInterial(local_to_body_orientation_from_imu_, msg->timestamp);
 }
 
 
@@ -722,6 +728,50 @@ void StereoOdom::microstrainHandler(const lcm::ReceiveBuffer* rbuf,
   estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), camera_linear_velocity_from_imu_, camera_angular_velocity_from_imu_);
   // estimator_->publishPose(temp_utime, "POSE_IMU_RATES", Eigen::Isometry3d::Identity(), camera_linear_velocity_from_imu_, camera_angular_velocity_from_imu_alpha_);
 }
+
+
+
+
+
+//int temp_counter_oxts = 0;
+void StereoOdom::oxtsHandler(const lcm::ReceiveBuffer* rbuf, 
+     const std::string& channel, const  ori::navigationframedata_t* msg){
+  //temp_counter_oxts++;
+  //if (temp_counter_oxts > 100){
+  //  temp_counter_oxts=0;
+  //  //std::cout << "got oxts\n";
+  //}
+
+  // convert to roll, pitch and yaw using assumed conventions:
+  Eigen::Quaterniond quat = euler_to_quat(msg->roll,-msg->pitch,M_PI/2-msg->yaw);
+
+  Eigen::Isometry3d iso;
+  iso.setIdentity();
+  // optionally remove the x,y,z offset - for ease of use:
+  iso.translation().x() = msg->utm_easting - 601907;
+  iso.translation().y() = msg->utm_northing - 5745580;
+  iso.translation().z() = -msg->utm_down -138;
+  iso.rotate(quat);
+
+  // since body frame is actually camera for wildcat, then rotate by the imu-to-camera rotation
+  // this is pretty rough:
+  Eigen::Quaterniond quat_pitch = euler_to_quat(0, 0.2075, 0); //about 12 degrees
+  iso.rotate( quat_pitch );
+
+  local_to_body_orientation_from_imu_ = Eigen::Quaterniond( iso.rotation() );
+
+  /*
+  double rpy[3];
+  quat_to_euler(  local_to_body_orientation_from_imu_ , rpy[0], rpy[1], rpy[2]);
+  std::cout << rpy[0]*180.0/M_PI << ", "
+            << rpy[1]*180.0/M_PI << ", "
+            << rpy[2]*180.0/M_PI << "\n";
+  */
+
+// Use the GPS as the source of pose body
+//  estimator_->publishPose(msg->utime, "POSE_BODY", iso, Eigen::Vector3d::Identity(), Eigen::Vector3d::Identity());
+}
+
 
 
 int main(int argc, char **argv){
