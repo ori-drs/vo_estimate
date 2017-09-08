@@ -6,11 +6,25 @@ project(tools)
 find_package(VTK REQUIRED)
 include(${VTK_USE_FILE})
 
-find_package(PCL 1.7 REQUIRED)#COMPONENTS common io)
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
-set(PCL_LIBRARIES pcl_io-1.7 pcl_common-1.7 pcl_filters-1.7 pcl_features-1.7 pcl_io-1.7 pcl_surface-1.7 pcl_segmentation-1.7 pcl_visualization-1.7 pcl_search-1.7 pcl_kdtree-1.7 pcl_keypoints-1.7)
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(PCL_IO pcl_io-1.7)
+if(PCL_IO_FOUND)
+  find_package(PCL 1.7 REQUIRED)#COMPONENTS common io)
+  include_directories(${PCL_INCLUDE_DIRS})
+  link_directories(${PCL_LIBRARY_DIRS})
+  add_definitions(${PCL_DEFINITIONS})
+  set(PCL_LIBRARIES pcl_io-1.7 pcl_common-1.7 pcl_filters-1.7 pcl_features-1.7 pcl_io-1.7 pcl_surface-1.7 pcl_segmentation-1.7 pcl_visualization-1.7 pcl_search-1.7 pcl_kdtree-1.7 pcl_keypoints-1.7)
+endif()
+
+pkg_check_modules(PCL_IO pcl_io-1.8)
+if(PCL_IO_FOUND)
+  find_package(PCL 1.8 REQUIRED)#COMPONENTS common io)
+  include_directories(${PCL_INCLUDE_DIRS})
+  link_directories(${PCL_LIBRARY_DIRS})
+  add_definitions(${PCL_DEFINITIONS})
+  set(PCL_LIBRARIES pcl_io-1.8 pcl_common-1.8 pcl_filters-1.8 pcl_features-1.8 pcl_io-1.8 pcl_surface-1.8 pcl_segmentation-1.8 pcl_visualization-1.8 pcl_search-1.8 pcl_kdtree-1.8 pcl_keypoints-1.8)
+endif()
 
 ############## vo slam w/ relative lidar points
 add_executable(se-vo-slam-lidar vo_slam_relative_lidar.cpp)
@@ -29,7 +43,7 @@ pods_install_executables(se-simple-isam-demo)
 ###############
 add_executable(se-isam-lidar isam_read_file_lidar.cpp)
 pods_use_pkg_config_packages(se-isam-lidar
-    pronto_vis pronto_math  eigen3 pcl_io-1.7)
+    pronto_vis pronto_math  eigen3 ${PCL_LIBRARIES})
 target_link_libraries (se-isam-lidar isam cholmod boost_system )
 pods_install_executables(se-isam-lidar)
 
