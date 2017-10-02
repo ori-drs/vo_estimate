@@ -9,31 +9,31 @@ include(cmake/pods.cmake)
 include(cmake/lcmtypes.cmake)
 lcmtypes_build()
 
-add_subdirectory(src/voconfig)
-add_subdirectory(src/vofeatures)
-add_subdirectory(src/voestimator)
-add_subdirectory(src/fovision)
+#add_subdirectory(src/voconfig)
+#add_subdirectory(src/vofeatures)
+#add_subdirectory(src/voestimator)
+#add_subdirectory(src/fovision)
 
-add_subdirectory(src/vis-loop-closure)
+#add_subdirectory(src/vis-loop-closure)
 
-add_subdirectory(src/motion_estimate_ypr_only)
-add_subdirectory(src/blacken_image)
+#add_subdirectory(src/motion_estimate_ypr_only)
+#add_subdirectory(src/blacken_image)
 
-add_subdirectory(src/tools)
-add_subdirectory(src/vins_writer)
+#add_subdirectory(src/tools)
+#add_subdirectory(src/vins_writer)
 
 
-pods_install_python_script(spoof-driving-posture scripts/spoof_driving_posture.py)
+#pods_install_python_script(spoof-driving-posture scripts/spoof_driving_posture.py)
 
 # Unit Testing
-include(CTest)
-set(test_data_dir ${CMAKE_SOURCE_DIR}/../../../../drc-testing-data)  # using ~/ probably won't work, instead define it relative to the project dir
-add_test(NAME test_testSimpleVo
-               COMMAND se-simple-vo -L ${test_data_dir}/state_est/run1_field_camera_snippet.lcmlog -P atlas/robot.cfg -p)
+#include(CTest)
+#set(test_data_dir ${CMAKE_SOURCE_DIR}/../../../../drc-testing-data)  # using ~/ probably won't work, instead define it relative to the project dir
+#add_test(NAME test_testSimpleVo
+#               COMMAND se-simple-vo -L ${test_data_dir}/state_est/run1_field_camera_snippet.lcmlog -P atlas/robot.cfg -p)
 
 
 # Unit Testing
 #include(CTest)
 #set(test_data_dir ${CMAKE_SOURCE_DIR}/../../../../drc-testing-data)  # using ~/ probably won't work, instead define it relative to the project dir
-add_test(NAME test_testSimpleIsamDemo
-               COMMAND se-simple-isam-demo)
+#add_test(NAME test_testSimpleIsamDemo
+#               COMMAND se-simple-isam-demo)
