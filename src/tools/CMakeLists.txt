@@ -41,6 +41,13 @@ target_link_libraries (se-simple-isam-demo isam cholmod  )
 pods_install_executables(se-simple-isam-demo)
 
 ###############
+add_executable(se-simple-isam-factor-demo simple_isam_to_factor_demo.cpp)
+pods_use_pkg_config_packages(se-simple-isam-factor-demo
+    pronto_vis pronto_math  eigen3 )
+target_link_libraries (se-simple-isam-factor-demo isam cholmod  )
+pods_install_executables(se-simple-isam-factor-demo)
+
+###############
 add_executable(se-isam-lidar isam_read_file_lidar.cpp)
 pods_use_pkg_config_packages(se-isam-lidar
     pronto_vis pronto_math  eigen3 ${PCL_LIBRARIES})
