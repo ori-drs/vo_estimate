@@ -39,6 +39,22 @@ struct Odometry {
   }
 };
 
+struct Odometry3D {
+  unsigned int id;  // the line number
+  std::string name;  // always EDGE3
+  unsigned int ref;  // reference frame
+  unsigned int source;  // source frame, sort by this!
+  Pose3d measurement;  // x, y, z, r, p, yaw
+  Noise cov;  // covariance consisting of varx, cov x y, cov x z, cov x r, cov x p, cov x yaw, var y, cov y z, cov y r, cov y p, cov y yaw, var z, cov z r, cov z p, cov z yaw, var r, cov r p, cov r yaw, var p, cov p yaw, var yaw
+
+  // sorting function
+  bool operator < (const Odometry& o) const {
+      return (source < o.source);
+  }
+};
+
+bool is3D = false;
+
 std::vector<Odometry> odometry;
 
 struct CommandLineConfig {
@@ -209,7 +225,7 @@ void add_prior() {
   node_mapping.push_back(std::make_pair(pg1_nodes.size()-1, 0));
   // add to LCM
   add_pose(0);
-  add_cloud(0);
+  if (dirname.compare("") != 0) add_cloud(0);
 }
 
 void parse_file(const std::string filename) {
@@ -237,6 +253,31 @@ void parse_file(const std::string filename) {
 
         // add to a vector of odometries
         odometry.push_back({line_num, "ODOMETRY", idx_x0, idx_x1, measurement, SqrtInformation(sqrtinf)});
+      }
+      // EDGE3 0 20 0.158465 -7.43489 -0.401354 0.155977 0.0182254 -0.0659959 10 0 0 0 0 0 10 0 0 0 0 10 0 0 0 100 0 0 100 0 25
+      else if(strs.at(0).compare("EDGE3") == 0){
+        is3D = true;
+        unsigned int idx_x0 = std::stoi(strs.at(1)), idx_x1 = std::stoi(strs.at(2));
+        double x = std::stod(strs.at(3)), y = std::stod(strs.at(4)), z = std::stod(strs.at(5)),
+               r = std::stod(strs.at(6)), p = std::stod(strs.at(7)), yaw = std::stod(strs.at(8)),
+               ixx = std::stod(strs.at(9)), ixy = std::stod(strs.at(10)), ixz = std::stod(strs.at(11)), ixr = std::stod(strs.at(12)), ixp = std::stod(strs.at(13)), ixyaw = std::stod(strs.at(14)),
+                                            iyy = std::stod(strs.at(15)), iyz = std::stod(strs.at(16)), iyr = std::stod(strs.at(17)), iyp = std::stod(strs.at(18)), iyyaw = std::stod(strs.at(19)),
+                                                                          izz = std::stod(strs.at(20)), izr = std::stod(strs.at(21)), izp = std::stod(strs.at(22)), izyaw = std::stod(strs.at(23)),
+                                                                                                        irr = std::stod(strs.at(24)), irp = std::stod(strs.at(25)), iryaw = std::stod(strs.at(26)),
+                                                                                                                                      ipp = std::stod(strs.at(27)), ipyaw = std::stod(strs.at(28)),
+                                                                                                                                                                    iyawyaw = std::stod(strs.at(29));
+        MatrixXd sqrtinf(6,6);
+        sqrtinf <<
+          ixx, ixy, ixz, ixr, ixp, ixyaw,
+          0.,  iyy, iyz, iyr, iyp, iyyaw,
+          0.,  0.,  izz, izr, izp, izyaw,
+          0.,  0.,  0.,  irr, irp, iryaw,
+          0.,  0.,  0.,  0.,  ipp, ipyaw,
+          0.,  0.,  0.,  0.,  0.,  iyawyaw;
+
+
+        // TODO: implement if you need lidar as well
+
       }
       ++line_num;
     }
@@ -344,22 +385,25 @@ int main(int argc, char **argv) {
   process_odometry();
 
   std::cout << "[iSAM] Finished processing odometry." << std::endl;
-  std::cout << "[iSAM] Extracting maps." << std::endl;
+  
+  if (dirname.compare("") != 0) {
+    std::cout << "[iSAM] Extracting maps." << std::endl;
 
-  // extract pointcloud maps
-  std::vector<int> start;
-  start.push_back(0);
-  start.push_back(569);
-  start.push_back(1122);
+    // extract pointcloud maps
+    std::vector<int> start;
+    start.push_back(0);
+    start.push_back(569);
+    start.push_back(1122);
 
-  std::vector<int> end;
-  end.push_back(568);
-  end.push_back(1120);
-  end.push_back(1676);
+    std::vector<int> end;
+    end.push_back(568);
+    end.push_back(1120);
+    end.push_back(1676);
 
-  extract_maps(start, end);
+    extract_maps(start, end);
 
-  std::cout << "[iSAM] Finished extracting maps." << std::endl;
+    std::cout << "[iSAM] Finished extracting maps." << std::endl;
+  }
   std::cout << "Exiting isam_read_file_lidar" << std::endl;
 
   return 0;

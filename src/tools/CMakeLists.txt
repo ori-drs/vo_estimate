@@ -17,8 +17,8 @@ if(PCL_IO_FOUND)
   set(PCL_LIBRARIES pcl_io-1.7 pcl_common-1.7 pcl_filters-1.7 pcl_features-1.7 pcl_io-1.7 pcl_surface-1.7 pcl_segmentation-1.7 pcl_visualization-1.7 pcl_search-1.7 pcl_kdtree-1.7 pcl_keypoints-1.7)
 endif()
 
-pkg_check_modules(PCL_IO pcl_io-1.8)
-if(PCL_IO_FOUND)
+pkg_check_modules(PCL_IO_1_8 pcl_io-1.8)
+if(PCL_IO_1_8_FOUND)
   find_package(PCL 1.8 REQUIRED)#COMPONENTS common io)
   include_directories(${PCL_INCLUDE_DIRS})
   link_directories(${PCL_LIBRARY_DIRS})
@@ -39,6 +39,13 @@ pods_use_pkg_config_packages(se-simple-isam-demo
     pronto_vis pronto_math  eigen3 )
 target_link_libraries (se-simple-isam-demo isam cholmod  )
 pods_install_executables(se-simple-isam-demo)
+
+###############
+add_executable(se-simple-isam-factor-demo simple_isam_to_factor_demo.cpp)
+pods_use_pkg_config_packages(se-simple-isam-factor-demo
+    pronto_vis pronto_math  eigen3 )
+target_link_libraries (se-simple-isam-factor-demo isam cholmod  )
+pods_install_executables(se-simple-isam-factor-demo)
 
 ###############
 add_executable(se-isam-lidar isam_read_file_lidar.cpp)
